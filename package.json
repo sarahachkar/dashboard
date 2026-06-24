@@ -1,0 +1,14 @@
+{
+  "name": "nexus-analytics",
+  "version": "1.0.0",
+  "description": "Plug-and-play analytics dashboard with a zero-dependency Node backend (real SQL via node:sqlite).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --experimental-sqlite server.js",
+    "dev": "node --watch --experimental-sqlite server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "MIT"
+}

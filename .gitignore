@@ -1,0 +1,7 @@
+# runtime database (regenerated on first run)
+nexus.db
+nexus.db-*
+# deps & local
+node_modules/
+.DS_Store
+.claude/

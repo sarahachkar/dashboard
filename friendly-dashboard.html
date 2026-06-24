@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #F8F9FC;
+  --card: #FFFFFF;
+  --text: #1f2230;
+  --text-soft: #6b7186;
+  --text-faint: #9aa0b4;
+  --accent: #5B5BD6;
+  --accent-soft: #ececfb;
+  --accent-hover: #4a4ac4;
+  --line: #eef0f6;
+  --shadow: 0 2px 12px rgba(0,0,0,0.07);
+  --shadow-hover: 0 6px 22px rgba(40,42,80,0.13);
+  --shadow-pop: 0 12px 40px rgba(30,32,60,0.18);
+  --good: #2bb673;
+  --bad: #e2557b;
+}
+[data-theme="dark"] {
+  --bg: #14161d;
+  --card: #1d202a;
+  --text: #e8eaf2;
+  --text-soft: #9aa0b4;
+  --text-faint: #6b7186;
+  --accent: #7d7df0;
+  --accent-soft: #2a2c44;
+  --accent-hover: #9292f5;
+  --line: #2a2e3a;
+  --shadow: 0 2px 12px rgba(0,0,0,0.35);
+  --shadow-hover: 0 6px 22px rgba(0,0,0,0.5);
+  --shadow-pop: 0 12px 40px rgba(0,0,0,0.55);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  transition: background .25s ease, color .25s ease;
+  padding-bottom: 120px;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; border: none; transition: all .2s ease; }
+input, select, textarea { font-family: inherit; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+
+/* ===== Top bar ===== */
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 20px 32px;
+  max-width: 1400px; margin: 0 auto;
+}
+.title-wrap { display: flex; align-items: center; gap: 8px; flex: 1; }
+.dash-title {
+  background: transparent; border: 2px solid transparent; color: var(--text);
+  font-size: 24px; font-weight: 700; padding: 6px 10px; border-radius: 12px;
+  outline: none; max-width: 480px; transition: all .2s ease;
+}
+.dash-title:hover { background: var(--card); }
+.dash-title:focus { background: var(--card); border-color: var(--accent); box-shadow: var(--shadow); }
+.topbar .pencil { color: var(--text-faint); font-size: 15px; opacity: 0; transition: opacity .2s; }
+.title-wrap:hover .pencil { opacity: 1; }
+
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.pill-btn {
+  background: var(--card); color: var(--text); border-radius: 12px;
+  padding: 10px 16px; font-size: 14px; font-weight: 500; box-shadow: var(--shadow);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.pill-btn:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.pill-btn.accent { background: var(--accent); color: #fff; }
+.pill-btn.accent:hover { background: var(--accent-hover); }
+.theme-toggle {
+  background: var(--card); box-shadow: var(--shadow); border-radius: 12px;
+  width: 42px; height: 42px; display: grid; place-items: center; font-size: 18px;
+}
+.theme-toggle:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+
+/* ===== Grid ===== */
+.canvas {
+  max-width: 1400px; margin: 0 auto; padding: 8px 32px 40px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px; align-items: start;
+}
+
+/* ===== Card ===== */
+.card {
+  background: var(--card); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 18px; display: flex; flex-direction: column; gap: 12px;
+  grid-column: span 1; transition: box-shadow .2s ease, transform .2s ease;
+  position: relative; min-height: 280px;
+  animation: cardIn .35s cubic-bezier(.2,.8,.3,1);
+}
+.card:hover { box-shadow: var(--shadow-hover); }
+.card.span-2 { grid-column: span 2; }
+.card.span-3 { grid-column: span 3; }
+@keyframes cardIn { from { opacity: 0; transform: scale(.94) translateY(8px); } to { opacity: 1; transform: none; } }
+.card.removing { animation: cardOut .25s ease forwards; }
+@keyframes cardOut { to { opacity: 0; transform: scale(.92); } }
+
+.card-head { display: flex; align-items: center; gap: 8px; }
+.drag-handle { color: var(--text-faint); cursor: grab; font-size: 16px; line-height: 1; user-select: none; }
+.card-title {
+  background: transparent; border: 1.5px solid transparent; color: var(--text);
+  font-size: 15.5px; font-weight: 600; padding: 4px 8px; border-radius: 9px;
+  outline: none; flex: 1; min-width: 20px; transition: all .2s ease;
+}
+.card-title:hover { background: var(--bg); }
+.card-title:focus { background: var(--bg); border-color: var(--accent); }
+.title-pencil { color: var(--text-faint); font-size: 13px; opacity: 0; transition: opacity .2s; cursor: pointer; }
+.card-head:hover .title-pencil { opacity: 1; }
+
+.card-tools { display: flex; align-items: center; gap: 4px; position: relative; }
+.tool-btn {
+  background: transparent; color: var(--text-soft); width: 30px; height: 30px;
+  border-radius: 9px; display: grid; place-items: center; font-size: 15px;
+}
+.tool-btn:hover { background: var(--bg); color: var(--accent); }
+.tool-btn.del { opacity: 0; }
+.card:hover .tool-btn.del { opacity: 1; }
+.tool-btn.del:hover { color: var(--bad); background: #fdecf1; }
+[data-theme="dark"] .tool-btn.del:hover { background: #3a2530; }
+
+/* type switcher popover */
+.popover {
+  position: absolute; top: 38px; right: 0; background: var(--card);
+  border-radius: 14px; box-shadow: var(--shadow-pop); padding: 8px;
+  display: none; grid-template-columns: 1fr 1fr; gap: 4px; z-index: 30; width: 230px;
+}
+.popover.open { display: grid; animation: popIn .18s ease; }
+@keyframes popIn { from { opacity: 0; transform: translateY(-6px) scale(.97); } to { opacity: 1; transform: none; } }
+.pop-item {
+  background: transparent; color: var(--text-soft); border-radius: 10px; padding: 9px 8px;
+  font-size: 12.5px; font-weight: 500; display: flex; align-items: center; gap: 8px; text-align: left;
+}
+.pop-item:hover { background: var(--bg); color: var(--text); }
+.pop-item.active { background: var(--accent-soft); color: var(--accent); }
+.pop-item .ic { font-size: 14px; }
+
+.card-body { flex: 1; position: relative; min-height: 180px; display: flex; }
+.card-body canvas { max-width: 100%; }
+
+/* settings row */
+.settings-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+.mini-field { display: flex; align-items: center; gap: 6px; }
+.mini-field label { font-size: 12px; color: var(--text-soft); }
+.mini-select {
+  background: var(--bg); color: var(--text); border-radius: 9px; padding: 6px 9px;
+  font-size: 12.5px; border: 1.5px solid transparent; outline: none; cursor: pointer; transition: all .2s;
+}
+.mini-select:hover { border-color: var(--line); }
+.mini-select:focus { border-color: var(--accent); }
+.edit-data-link {
+  background: transparent; color: var(--accent); font-size: 12.5px; font-weight: 500;
+  padding: 6px 4px; margin-left: auto; border-radius: 8px;
+}
+.edit-data-link:hover { text-decoration: underline; }
+
+.size-pills { display: inline-flex; background: var(--bg); border-radius: 9px; padding: 2px; gap: 2px; }
+.size-pills button {
+  background: transparent; color: var(--text-soft); border-radius: 7px;
+  width: 26px; height: 24px; font-size: 11px; font-weight: 600;
+}
+.size-pills button.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow); }
+
+/* fade for chart re-render */
+.card-body.fading { opacity: 0; transition: opacity .15s ease; }
+.card-body { transition: opacity .15s ease; }
+
+/* empty state */
+.empty-state {
+  margin: auto; text-align: center; color: var(--text-faint); padding: 20px;
+}
+.empty-state .illo {
+  width: 72px; height: 72px; margin: 0 auto 14px; border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent-soft), var(--bg));
+  display: grid; place-items: center; font-size: 32px;
+}
+.empty-state .msg { font-size: 13.5px; line-height: 1.5; max-width: 200px; margin: 0 auto; }
+.error-state { margin: auto; text-align: center; color: var(--bad); padding: 20px; font-size: 13px; line-height: 1.5; }
+.error-state .face { font-size: 30px; margin-bottom: 8px; }
+
+/* KPI tiles */
+.kpi-row { display: flex; gap: 12px; width: 100%; flex-wrap: wrap; align-content: center; }
+.kpi-tile {
+  flex: 1; min-width: 130px; background: var(--bg); border-radius: 14px; padding: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.kpi-tile .k-label { font-size: 12.5px; color: var(--text-soft); }
+.kpi-tile .k-value { font-size: 26px; font-weight: 700; }
+.kpi-tile .k-trend { font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+.k-trend.up { color: var(--good); } .k-trend.down { color: var(--bad); }
+
+/* data table */
+.data-table-wrap { width: 100%; overflow: auto; max-height: 260px; }
+table.data-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.data-table th { position: sticky; top: 0; background: var(--card); text-align: left; padding: 8px 10px; color: var(--text-soft); font-weight: 600; border-bottom: 1px solid var(--line); }
+table.data-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--text); }
+table.data-table tr:hover td { background: var(--bg); }
+
+/* ===== Edit-data inline panel ===== */
+.edit-panel {
+  max-height: 0; overflow: hidden; opacity: 0;
+  transition: max-height .28s ease, opacity .2s ease, margin .2s ease;
+  border-radius: 12px; background: var(--bg);
+}
+.edit-panel.open { max-height: 420px; opacity: 1; margin-top: 4px; padding: 12px; }
+.edit-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+.edit-tab {
+  background: transparent; color: var(--text-soft); border-radius: 9px; padding: 7px 12px;
+  font-size: 12.5px; font-weight: 500;
+}
+.edit-tab.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow); }
+.edit-tabpane { display: none; }
+.edit-tabpane.active { display: block; }
+textarea.csv-input {
+  width: 100%; min-height: 110px; resize: vertical; background: var(--card); color: var(--text);
+  border: 1.5px solid var(--line); border-radius: 10px; padding: 10px; font-size: 12.5px;
+  font-family: 'Inter', monospace; outline: none; line-height: 1.5;
+}
+textarea.csv-input:focus { border-color: var(--accent); }
+.mini-sheet-wrap { overflow: auto; max-height: 200px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--card); }
+table.mini-sheet { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.mini-sheet th, table.mini-sheet td { border: 1px solid var(--line); padding: 0; }
+table.mini-sheet input { width: 100%; min-width: 70px; background: transparent; border: none; color: var(--text); padding: 6px 7px; font-size: 12px; outline: none; }
+table.mini-sheet th input { font-weight: 600; color: var(--text-soft); }
+table.mini-sheet input:focus { background: var(--accent-soft); }
+.sheet-del { background: transparent; color: var(--text-faint); padding: 2px 6px; font-size: 13px; }
+.sheet-del:hover { color: var(--bad); }
+.edit-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+.tiny-btn { background: var(--card); color: var(--text); border-radius: 9px; padding: 7px 12px; font-size: 12.5px; font-weight: 500; box-shadow: var(--shadow); }
+.tiny-btn:hover { box-shadow: var(--shadow-hover); }
+.tiny-btn.accent { background: var(--accent); color: #fff; box-shadow: none; }
+.tiny-btn.accent:hover { background: var(--accent-hover); }
+
+/* ===== Add Chart button ===== */
+.add-fab {
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: #fff; height: 48px; padding: 0 26px;
+  border-radius: 999px; font-size: 15px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 10px;
+  box-shadow: 0 8px 28px rgba(91,91,214,.42); z-index: 60;
+}
+.add-fab:hover { background: var(--accent-hover); transform: translateX(-50%) translateY(-2px); box-shadow: 0 12px 32px rgba(91,91,214,.5); }
+.add-fab .plus { font-size: 20px; line-height: 1; }
+.add-fab.pulse { animation: pulse 1.4s ease 2; }
+@keyframes pulse {
+  0%,100% { box-shadow: 0 8px 28px rgba(91,91,214,.42); }
+  50% { box-shadow: 0 8px 28px rgba(91,91,214,.42), 0 0 0 12px rgba(91,91,214,.14); }
+}
+
+/* ===== Add Chart modal ===== */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(25,27,45,.32); backdrop-filter: blur(2px);
+  z-index: 100; opacity: 0; pointer-events: none; transition: opacity .25s ease;
+}
+.modal-overlay.open { opacity: 1; pointer-events: auto; }
+.modal {
+  position: fixed; left: 50%; bottom: 0; transform: translateX(-50%) translateY(100%);
+  width: min(640px, 100%); background: var(--card); border-radius: 22px 22px 0 0;
+  box-shadow: var(--shadow-pop); z-index: 101; padding: 24px 26px 30px;
+  transition: transform .3s cubic-bezier(.2,.8,.3,1); max-height: 88vh; overflow-y: auto;
+}
+.modal.open { transform: translateX(-50%) translateY(0); }
+.modal h2 { font-size: 19px; font-weight: 700; margin: 0 0 4px; }
+.modal .sub { color: var(--text-soft); font-size: 13px; margin: 0 0 18px; }
+.modal-label { font-size: 13px; font-weight: 600; color: var(--text); margin: 16px 0 8px; }
+.type-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.type-card {
+  background: var(--bg); border-radius: 14px; padding: 14px 10px; text-align: center;
+  border: 2px solid transparent; display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.type-card:hover { border-color: var(--line); }
+.type-card.active { border-color: var(--accent); background: var(--accent-soft); }
+.type-card .ic { font-size: 24px; }
+.type-card .nm { font-size: 12.5px; font-weight: 500; color: var(--text); }
+.modal-input {
+  width: 100%; background: var(--bg); color: var(--text); border: 1.5px solid var(--line);
+  border-radius: 12px; padding: 11px 14px; font-size: 14px; outline: none; transition: all .2s;
+}
+.modal-input:focus { border-color: var(--accent); }
+.source-pills { display: flex; gap: 8px; }
+.source-pill {
+  flex: 1; background: var(--bg); color: var(--text-soft); border-radius: 12px; padding: 11px;
+  font-size: 13px; font-weight: 500; border: 2px solid transparent;
+}
+.source-pill.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.modal-add {
+  width: 100%; background: var(--accent); color: #fff; border-radius: 12px; padding: 13px;
+  font-size: 15px; font-weight: 600; margin-top: 22px;
+}
+.modal-add:hover { background: var(--accent-hover); }
+.modal-close { position: absolute; top: 18px; right: 20px; background: var(--bg); width: 34px; height: 34px; border-radius: 10px; color: var(--text-soft); font-size: 16px; display: grid; place-items: center; }
+.modal-close:hover { color: var(--text); }
+
+/* ===== Undo toast ===== */
+.toast {
+  position: fixed; bottom: 28px; left: 28px; background: var(--text); color: var(--card);
+  padding: 13px 18px; border-radius: 14px; box-shadow: var(--shadow-pop); z-index: 120;
+  display: flex; align-items: center; gap: 14px; font-size: 13.5px; font-weight: 500;
+  transform: translateY(120px); opacity: 0; transition: all .28s cubic-bezier(.2,.8,.3,1);
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast .undo-btn { background: transparent; color: var(--accent); font-weight: 600; font-size: 13.5px; padding: 4px 6px; }
+[data-theme="dark"] .toast .undo-btn { color: var(--accent-hover); }
+
+@media (max-width: 720px) {
+  .topbar, .canvas { padding-left: 16px; padding-right: 16px; }
+  .card.span-2, .card.span-3 { grid-column: span 1; }
+  .type-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<header class="topbar">
+  <div class="title-wrap">
+    <input class="dash-title" id="dashTitle" value="My Dashboard" spellcheck="false">
+    <span class="pencil">✎</span>
+  </div>
+  <div class="topbar-right">
+    <button class="theme-toggle" id="themeToggle" title="Switch theme">🌙</button>
+    <button class="pill-btn" id="shareBtn">🔗 Share</button>
+  </div>
+</header>
+
+<!-- Canvas -->
+<main class="canvas" id="canvas"></main>
+
+<!-- Add chart button -->
+<button class="add-fab" id="addFab"><span class="plus">+</span> Add chart</button>
+
+<!-- Add chart modal -->
+<div class="modal-overlay" id="modalOverlay"></div>
+<div class="modal" id="modal">
+  <button class="modal-close" id="modalClose">✕</button>
+  <h2>Add a chart</h2>
+  <p class="sub">Pick a chart type and we'll drop it onto your dashboard with sample data.</p>
+
+  <div class="modal-label">Chart type</div>
+  <div class="type-grid" id="typeGrid"></div>
+
+  <div class="modal-label">Chart title</div>
+  <input class="modal-input" id="newTitle" placeholder="e.g. Weekly signups">
+
+  <div class="modal-label">Data source</div>
+  <div class="source-pills" id="sourcePills">
+    <button class="source-pill active" data-source="sample">✨ Sample data</button>
+    <button class="source-pill" data-source="manual">✏️ Manual entry</button>
+    <button class="source-pill" data-source="csv">📋 Paste CSV</button>
+  </div>
+
+  <button class="modal-add" id="modalAdd">Add to dashboard</button>
+</div>
+
+<!-- Undo toast -->
+<div class="toast" id="toast">
+  <span id="toastMsg">Chart removed</span>
+  <button class="undo-btn" id="undoBtn">Undo</button>
+</div>
+
+<script>
+/* =====================================================================
+   My Dashboard — friendly light-first analytics (single file)
+   ===================================================================== */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const LS = 'friendly_dashboard_v1';
+
+const TYPES = [
+  ['line','Line','📈'], ['bar','Bar','📊'], ['pie','Pie','🥧'],
+  ['donut','Donut','🍩'], ['area','Area','🏔️'], ['scatter','Scatter','✨'],
+  ['kpi','KPI card','🔢'], ['table','Table','▦'], ['gauge','Gauge','🎯']
+];
+const TYPE_LABEL = Object.fromEntries(TYPES.map(t=>[t[0],t[1]]));
+const TYPE_ICON = Object.fromEntries(TYPES.map(t=>[t[0],t[2]]));
+const PALETTE = ['#5B5BD6','#2bb673','#e2a02b','#e2557b','#3ba3e2','#9b5bd6','#56c2b0','#d6915b'];
+
+let charts = {};   // cardId -> Chart instance
+let state = load();
+let pendingDelete = null, undoTimer = null;
+
+/* ---------------- sample datasets ---------------- */
+function months(){ return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; }
+function sampleFor(type) {
+  if (type==='bar' || type==='pie' || type==='donut') {
+    return { columns:['category','sales'], rows:[
+      {category:'Electronics', sales:4200}, {category:'Apparel', sales:3100},
+      {category:'Home', sales:2600}, {category:'Sports', sales:1900}, {category:'Beauty', sales:1500}
+    ]};
+  }
+  if (type==='scatter') {
+    return { columns:['ad_spend','revenue'], rows: months().map((m,i)=>({
+      ad_spend: 200+i*60+(i%3)*40, revenue: 1200+i*180+(i%4)*120
+    }))};
+  }
+  if (type==='kpi') {
+    return { columns:['metric','value'], rows:[
+      {metric:'Total revenue', value:128400, trend:12.4},
+      {metric:'Avg order value', value:68, trend:3.1},
+      {metric:'Active users', value:2940, trend:-1.8}
+    ]};
+  }
+  if (type==='gauge') {
+    return { columns:['metric','value'], rows:[{metric:'Goal progress', value:72}] };
+  }
+  if (type==='table') {
+    return { columns:['month','revenue','orders'], rows: months().slice(0,6).map((m,i)=>({
+      month:m, revenue: 9000+i*1400, orders: 120+i*22
+    }))};
+  }
+  // line / area default → monthly revenue
+  return { columns:['month','revenue'], rows: months().map((m,i)=>({
+    month:m, revenue: Math.round(8000 + 2600*Math.sin(i/2) + i*420)
+  }))};
+}
+
+/* ---------------- default cards ---------------- */
+function defaultCards() {
+  return [
+    mkCard('line', 'Monthly revenue', sampleFor('line'), 'month', 'revenue', 'span-2'),
+    mkCard('bar', 'Sales by category', sampleFor('bar'), 'category', 'sales', 'span-1'),
+    mkCard('kpi', 'Key metrics', sampleFor('kpi'), 'metric', 'value', 'span-2')
+  ];
+}
+function mkCard(type, title, data, x, y, size='span-1') {
+  return { id:'c'+Math.random().toString(36).slice(2,9), type, title, data, x, y, size };
+}
+
+/* ---------------- persistence ---------------- */
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(LS)); if (s && s.cards) return s; } catch(e){}
+  return { title:'My Dashboard', theme:'light', cards: defaultCards(), seenPulse:false };
+}
+function save() {
+  state.title = $('#dashTitle').value;
+  try { localStorage.setItem(LS, JSON.stringify(state)); } catch(e){}
+}
+
+/* ---------------- column-type helpers ---------------- */
+function isNumericCol(data, col) {
+  const vals = data.rows.map(r=>r[col]).filter(v=>v!==null&&v!==undefined&&v!=='');
+  return vals.length>0 && vals.every(v=>typeof v==='number' || (!isNaN(+v) && v!==''));
+}
+function numCols(data){ return data.columns.filter(c=>isNumericCol(data,c)); }
+
+/* =====================================================================
+   Render all cards
+   ===================================================================== */
+function renderAll() {
+  const canvas = $('#canvas');
+  Object.values(charts).forEach(c=>{try{c.destroy()}catch(e){}});
+  charts = {};
+  canvas.innerHTML = '';
+  state.cards.forEach(card => canvas.appendChild(buildCard(card)));
+  state.cards.forEach(card => drawChart(card));
+}
+
+function buildCard(card) {
+  const el = document.createElement('div');
+  el.className = 'card ' + card.size;
+  el.dataset.id = card.id;
+
+  const cols = card.data ? card.data.columns : [];
+  const showAxes = !['kpi','table','gauge'].includes(card.type);
+  const optList = (sel)=> cols.map(c=>`<option ${c===sel?'selected':''}>${esc(c)}</option>`).join('');
+
+  el.innerHTML = `
+    <div class="card-head">
+      <span class="drag-handle" title="Drag to reorder">⠿</span>
+      <input class="card-title" value="${esc(card.title)}" spellcheck="false">
+      <span class="title-pencil" title="Rename">✎</span>
+      <div class="card-tools">
+        <button class="tool-btn switch" title="Change chart type">${TYPE_ICON[card.type]||'📊'}</button>
+        <button class="tool-btn del" title="Delete">✕</button>
+        <div class="popover">
+          ${TYPES.map(([v,l,ic])=>`<button class="pop-item ${v===card.type?'active':''}" data-type="${v}"><span class="ic">${ic}</span>${l}</button>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="card-body" id="body-${card.id}"></div>
+
+    <div class="settings-row">
+      ${showAxes ? `
+        <div class="mini-field"><label>X axis</label>
+          <select class="mini-select" data-axis="x">${optList(card.x)}</select></div>
+        <div class="mini-field"><label>Y axis</label>
+          <select class="mini-select" data-axis="y">${optList(card.y)}</select></div>
+      ` : `<div class="mini-field"><label style="color:var(--text-faint)">${TYPE_LABEL[card.type]}</label></div>`}
+      <button class="edit-data-link">✏️ Edit data</button>
+    </div>
+
+    <div class="settings-row" style="border-top:none;padding-top:0">
+      <div class="size-pills" title="Resize card">
+        <button data-size="span-1" class="${card.size==='span-1'?'active':''}">S</button>
+        <button data-size="span-2" class="${card.size==='span-2'?'active':''}">M</button>
+        <button data-size="span-3" class="${card.size==='span-3'?'active':''}">L</button>
+      </div>
+    </div>
+
+    <div class="edit-panel" id="edit-${card.id}"></div>
+  `;
+
+  // title rename
+  const titleInput = el.querySelector('.card-title');
+  titleInput.addEventListener('change', ()=>{ card.title=titleInput.value; save(); });
+  el.querySelector('.title-pencil').onclick = ()=>{ titleInput.focus(); titleInput.select(); };
+
+  // axis change → smooth re-render
+  el.querySelectorAll('[data-axis]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{ card[sel.dataset.axis]=sel.value; fadeRedraw(card); save(); });
+  });
+
+  // type switcher popover
+  const pop = el.querySelector('.popover');
+  el.querySelector('.switch').onclick = (e)=>{ e.stopPropagation(); $$('.popover.open').forEach(p=>{if(p!==pop)p.classList.remove('open');}); pop.classList.toggle('open'); };
+  pop.querySelectorAll('.pop-item').forEach(it=>{
+    it.onclick = ()=>{ changeType(card, it.dataset.type, el); pop.classList.remove('open'); };
+  });
+
+  // delete (with undo)
+  el.querySelector('.del').onclick = ()=> requestDelete(card, el);
+
+  // resize
+  el.querySelectorAll('[data-size]').forEach(b=>{
+    b.onclick = ()=>{
+      card.size = b.dataset.size; el.className = 'card '+card.size;
+      el.querySelectorAll('[data-size]').forEach(x=>x.classList.toggle('active', x.dataset.size===card.size));
+      if (charts[card.id]) setTimeout(()=>{try{charts[card.id].resize()}catch(e){}},210);
+      save();
+    };
+  });
+
+  // edit data
+  el.querySelector('.edit-data-link').onclick = ()=> toggleEditPanel(card, el);
+
+  return el;
+}
+
+/* =====================================================================
+   Drawing charts
+   ===================================================================== */
+function drawChart(card) {
+  const body = $('#body-'+card.id);
+  if (!body) return;
+  if (charts[card.id]) { try{charts[card.id].destroy()}catch(e){} delete charts[card.id]; }
+  body.innerHTML = '';
+  body.classList.remove('fading');
+
+  // empty state
+  if (!card.data || !card.data.rows || !card.data.rows.length) {
+    body.innerHTML = `<div class="empty-state"><div class="illo">📊</div>
+      <div class="msg">No data yet — click <b>‘Edit data’</b> to get started</div></div>`;
+    return;
+  }
+
+  try {
+    if (card.type==='kpi')   return drawKPI(card, body);
+    if (card.type==='table') return drawTable(card, body);
+    if (card.type==='gauge') return drawGauge(card, body);
+
+    const canvas = document.createElement('canvas');
+    body.appendChild(canvas);
+    charts[card.id] = new Chart(canvas.getContext('2d'), buildConfig(card));
+  } catch (err) {
+    body.innerHTML = `<div class="error-state"><div class="face">😕</div>
+      Something looks off with this data — try editing it.</div>`;
+  }
+}
+
+function fadeRedraw(card) {
+  const body = $('#body-'+card.id);
+  if (!body) return drawChart(card);
+  body.classList.add('fading');
+  setTimeout(()=>drawChart(card), 150);
+}
+
+function gridC(){ return getComputedStyle(document.body).getPropertyValue('--line').trim(); }
+function softC(){ return getComputedStyle(document.body).getPropertyValue('--text-soft').trim(); }
+
+function buildConfig(card) {
+  const d = card.data, t = card.type;
+  const labels = d.rows.map(r=>r[card.x]);
+  const values = d.rows.map(r=> num(r[card.y]));
+
+  const common = {
+    responsive:true, maintainAspectRatio:false,
+    animation:{ duration:300 },
+    plugins:{ legend:{ display:['pie','donut'].includes(t), position:'bottom', labels:{ color:softC(), font:{family:'Inter',size:12}, padding:14, usePointStyle:true } } },
+    scales: ['pie','donut'].includes(t) ? {} : {
+      x:{ ticks:{ color:softC(), font:{family:'Inter',size:11} }, grid:{ display:false } },
+      y:{ ticks:{ color:softC(), font:{family:'Inter',size:11} }, grid:{ color:gridC() }, beginAtZero:true }
+    }
+  };
+
+  if (t==='pie' || t==='donut') {
+    return { type:'doughnut', data:{ labels, datasets:[{ data:values, backgroundColor:PALETTE, borderColor:getComputedStyle(document.body).getPropertyValue('--card'), borderWidth:3 }] },
+      options:{ ...common, cutout: t==='donut'?'64%':'0%' } };
+  }
+  if (t==='scatter') {
+    if (!isNumericCol(d,card.x) || !isNumericCol(d,card.y)) throw new Error('need numeric');
+    return { type:'scatter', data:{ datasets:[{ label:card.y, data:d.rows.map(r=>({x:num(r[card.x]),y:num(r[card.y])})), backgroundColor:PALETTE[0]+'cc', borderColor:PALETTE[0], pointRadius:5, pointHoverRadius:7 }] }, options:common };
+  }
+  if (t==='line' || t==='area') {
+    return { type:'line', data:{ labels, datasets:[{ label:card.y, data:values, borderColor:PALETTE[0], backgroundColor:t==='area'?hexA(PALETTE[0],.16):'transparent', fill:t==='area', tension:.4, pointRadius:3, pointHoverRadius:6, pointBackgroundColor:PALETTE[0], borderWidth:2.5 }] }, options:common };
+  }
+  // bar
+  return { type:'bar', data:{ labels, datasets:[{ label:card.y, data:values, backgroundColor: values.map((_,i)=>PALETTE[i%PALETTE.length]), borderRadius:8, maxBarThickness:48 }] }, options:common };
+}
+
+function drawKPI(card, body) {
+  const row = document.createElement('div'); row.className='kpi-row';
+  row.innerHTML = card.data.rows.map((r,i)=>{
+    const trend = r.trend;
+    const val = num(r.value);
+    return `<div class="kpi-tile">
+      <span class="k-label">${esc(r.metric ?? r[card.data.columns[0]] ?? 'Metric')}</span>
+      <span class="k-value" style="color:${PALETTE[i%PALETTE.length]}">${fmt(val)}</span>
+      ${trend!==undefined ? `<span class="k-trend ${trend>=0?'up':'down'}">${trend>=0?'↑':'↓'} ${Math.abs(trend)}%</span>` : ''}
+    </div>`;
+  }).join('');
+  body.appendChild(row);
+}
+
+function drawTable(card, body) {
+  const cols = card.data.columns;
+  const wrap = document.createElement('div'); wrap.className='data-table-wrap';
+  wrap.innerHTML = `<table class="data-table"><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
+    <tbody>${card.data.rows.map(r=>`<tr>${cols.map(c=>`<td>${esc(r[c]??'')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  body.appendChild(wrap);
+}
+
+function drawGauge(card, body) {
+  const v = num(card.data.rows[0]?.value) || 0;
+  const max = v>100 ? Math.ceil(v*1.3) : 100;
+  const pct = Math.max(0, Math.min(1, v/max));
+  const canvas = document.createElement('canvas'); body.appendChild(canvas);
+  charts[card.id] = new Chart(canvas.getContext('2d'), {
+    type:'doughnut',
+    data:{ datasets:[{ data:[pct,1-pct], backgroundColor:[PALETTE[0], gridC()], borderWidth:0, circumference:270, rotation:225, cutout:'76%' }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},tooltip:{enabled:false}}, animation:{duration:400} },
+    plugins:[{ id:'gt', afterDraw(ch){ const {ctx,chartArea:{width,height,top,left}}=ch; ctx.save();
+      const cx=left+width/2, cy=top+height/2+8;
+      ctx.fillStyle=getComputedStyle(document.body).getPropertyValue('--text'); ctx.textAlign='center';
+      ctx.font='700 30px Inter'; ctx.fillText(max<=100? v+'%' : fmt(v), cx, cy);
+      ctx.fillStyle=softC(); ctx.font='500 12px Inter'; ctx.fillText(card.data.rows[0]?.metric||'', cx, cy+22); ctx.restore(); } }]
+  });
+}
+
+/* =====================================================================
+   Change chart type (keep data)
+   ===================================================================== */
+function changeType(card, type, el) {
+  card.type = type;
+  // ensure sensible axes
+  if (!['kpi','table','gauge'].includes(type)) {
+    if (!card.data.columns.includes(card.x)) card.x = card.data.columns[0];
+    const n = numCols(card.data);
+    if (!card.data.columns.includes(card.y)) card.y = n[0] || card.data.columns[1] || card.data.columns[0];
+  }
+  // rebuild card DOM so axis row + switcher icon update
+  const fresh = buildCard(card);
+  el.replaceWith(fresh);
+  drawChart(card);
+  save();
+}
+
+/* =====================================================================
+   Delete with undo
+   ===================================================================== */
+function requestDelete(card, el) {
+  const idx = state.cards.findIndex(c=>c.id===card.id);
+  el.classList.add('removing');
+  setTimeout(()=>{
+    if (charts[card.id]) { try{charts[card.id].destroy()}catch(e){} delete charts[card.id]; }
+    state.cards.splice(idx,1); el.remove(); save();
+  }, 240);
+  pendingDelete = { card, idx };
+  showToast(`“${truncate(card.title,24)}” removed`);
+}
+function showToast(msg) {
+  $('#toastMsg').textContent = msg;
+  const t = $('#toast'); t.classList.add('show');
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(()=>{ t.classList.remove('show'); pendingDelete=null; }, 2400);
+}
+$('#undoBtn').onclick = ()=>{
+  if (!pendingDelete) return;
+  state.cards.splice(pendingDelete.idx, 0, pendingDelete.card);
+  pendingDelete = null; $('#toast').classList.remove('show');
+  renderAll(); save();
+};
+
+/* =====================================================================
+   Edit-data inline panel
+   ===================================================================== */
+function toggleEditPanel(card, el) {
+  const panel = el.querySelector('#edit-'+card.id);
+  if (panel.classList.contains('open')) { panel.classList.remove('open'); panel.innerHTML=''; return; }
+  $$('.edit-panel.open').forEach(p=>{ p.classList.remove('open'); p.innerHTML=''; });
+
+  panel.innerHTML = `
+    <div class="edit-tabs">
+      <button class="edit-tab active" data-tab="csv">📋 Paste CSV</button>
+      <button class="edit-tab" data-tab="manual">✏️ Manual</button>
+    </div>
+    <div class="edit-tabpane active" data-pane="csv">
+      <textarea class="csv-input" placeholder="month,revenue\nJan,8200\nFeb,9100">${toCSV(card.data)}</textarea>
+      <div class="edit-actions">
+        <button class="tiny-btn accent" data-act="apply-csv">Apply</button>
+        <span style="color:var(--text-faint);font-size:12px">First row = column names</span>
+      </div>
+    </div>
+    <div class="edit-tabpane" data-pane="manual">
+      <div class="mini-sheet-wrap"><table class="mini-sheet"></table></div>
+      <div class="edit-actions">
+        <button class="tiny-btn" data-act="add-row">+ Row</button>
+        <button class="tiny-btn" data-act="add-col">+ Column</button>
+        <button class="tiny-btn accent" data-act="apply-manual" style="margin-left:auto">Apply</button>
+      </div>
+    </div>
+  `;
+  panel.classList.add('open');
+
+  // tabs
+  panel.querySelectorAll('.edit-tab').forEach(tab=>tab.onclick=()=>{
+    panel.querySelectorAll('.edit-tab').forEach(t=>t.classList.remove('active'));
+    panel.querySelectorAll('.edit-tabpane').forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    panel.querySelector(`[data-pane="${tab.dataset.tab}"]`).classList.add('active');
+    if (tab.dataset.tab==='manual') renderSheet(card, panel);
+  });
+
+  // working copy for manual editing
+  panel._sheet = { columns: card.data.columns.slice(), rows: card.data.rows.map(r=>card.data.columns.map(c=>r[c])) };
+  renderSheet(card, panel);
+
+  panel.querySelector('[data-act="apply-csv"]').onclick = ()=>{
+    const parsed = parseCSV(panel.querySelector('.csv-input').value);
+    if (!parsed) return;
+    applyData(card, parsed, el);
+  };
+  panel.querySelector('[data-act="add-row"]').onclick = ()=>{ panel._sheet.rows.push(panel._sheet.columns.map(()=>'')); renderSheet(card, panel); };
+  panel.querySelector('[data-act="add-col"]').onclick = ()=>{ panel._sheet.columns.push('column'+(panel._sheet.columns.length+1)); panel._sheet.rows.forEach(r=>r.push('')); renderSheet(card, panel); };
+  panel.querySelector('[data-act="apply-manual"]').onclick = ()=>{
+    const s = panel._sheet;
+    const rows = s.rows.map(r=>{ const o={}; s.columns.forEach((c,i)=>o[c]=coerce(r[i])); return o; });
+    applyData(card, { columns:s.columns.slice(), rows }, el);
+  };
+}
+
+function renderSheet(card, panel) {
+  const s = panel._sheet; const t = panel.querySelector('.mini-sheet');
+  if (!t) return;
+  t.innerHTML =
+    `<thead><tr>${s.columns.map((c,ci)=>`<th><input data-c="${ci}" value="${esc(c)}"></th>`).join('')}<th></th></tr></thead>` +
+    `<tbody>${s.rows.map((row,ri)=>`<tr>${s.columns.map((_,ci)=>`<td><input data-r="${ri}" data-cc="${ci}" value="${esc(row[ci]??'')}"></td>`).join('')}<td><button class="sheet-del" data-dr="${ri}">✕</button></td></tr>`).join('')}</tbody>`;
+  t.querySelectorAll('input[data-c]').forEach(inp=>inp.onchange=()=>s.columns[+inp.dataset.c]=inp.value);
+  t.querySelectorAll('input[data-r]').forEach(inp=>inp.onchange=()=>s.rows[+inp.dataset.r][+inp.dataset.cc]=inp.value);
+  t.querySelectorAll('[data-dr]').forEach(b=>b.onclick=()=>{ s.rows.splice(+b.dataset.dr,1); renderSheet(card,panel); });
+}
+
+function applyData(card, data, el) {
+  card.data = data;
+  if (!data.columns.includes(card.x)) card.x = data.columns[0];
+  if (!data.columns.includes(card.y)) card.y = numCols(data)[0] || data.columns[1] || data.columns[0];
+  const fresh = buildCard(card);
+  el.replaceWith(fresh);
+  drawChart(card);
+  save();
+}
+
+/* =====================================================================
+   CSV helpers
+   ===================================================================== */
+function parseCSV(text) {
+  const lines = (text||'').trim().split(/\r?\n/).filter(l=>l.trim());
+  if (lines.length < 2) return null;
+  const split = l => l.split(',').map(s=>s.trim());
+  const columns = split(lines[0]);
+  const rows = lines.slice(1).map(l=>{ const c=split(l); const o={}; columns.forEach((h,i)=>o[h]=coerce(c[i])); return o; });
+  return { columns, rows };
+}
+function toCSV(data) {
+  if (!data || !data.rows.length) return '';
+  return data.columns.join(',') + '\n' + data.rows.map(r=>data.columns.map(c=>r[c]??'').join(',')).join('\n');
+}
+function coerce(v){ if(v===''||v===undefined||v===null) return ''; const n=Number(v); return (!isNaN(n)&&String(v).trim()!=='')?n:v; }
+
+/* =====================================================================
+   Add-chart modal
+   ===================================================================== */
+let modalType = 'line', modalSource = 'sample';
+function buildTypeGrid() {
+  $('#typeGrid').innerHTML = TYPES.map(([v,l,ic])=>
+    `<button class="type-card ${v===modalType?'active':''}" data-type="${v}"><span class="ic">${ic}</span><span class="nm">${l}</span></button>`).join('');
+  $$('#typeGrid .type-card').forEach(c=>c.onclick=()=>{
+    modalType=c.dataset.type;
+    $$('#typeGrid .type-card').forEach(x=>x.classList.toggle('active', x.dataset.type===modalType));
+  });
+}
+function openModal() {
+  modalType='line'; modalSource='sample';
+  buildTypeGrid();
+  $('#newTitle').value='';
+  $$('#sourcePills .source-pill').forEach(p=>p.classList.toggle('active', p.dataset.source==='sample'));
+  $('#modalOverlay').classList.add('open');
+  $('#modal').classList.add('open');
+  setTimeout(()=>$('#newTitle').focus(), 200);
+}
+function closeModal() { $('#modalOverlay').classList.remove('open'); $('#modal').classList.remove('open'); }
+
+$('#sourcePills').querySelectorAll('.source-pill').forEach(p=>p.onclick=()=>{
+  modalSource=p.dataset.source;
+  $$('#sourcePills .source-pill').forEach(x=>x.classList.toggle('active', x===p));
+});
+$('#modalAdd').onclick = ()=>{
+  const title = $('#newTitle').value.trim() || (TYPE_LABEL[modalType]+' chart');
+  let data;
+  if (modalSource==='manual') data = { columns:['label','value'], rows:[{label:'A',value:10},{label:'B',value:20},{label:'C',value:15}] };
+  else data = sampleFor(modalType);
+  const n = numCols(data);
+  const x = data.columns[0];
+  const y = n[0] || data.columns[1] || data.columns[0];
+  const card = mkCard(modalType, title, data, x, y, 'span-1');
+  state.cards.push(card);
+  closeModal();
+  const canvas = $('#canvas');
+  const el = buildCard(card); canvas.appendChild(el); drawChart(card);
+  el.scrollIntoView({behavior:'smooth', block:'nearest'});
+  save();
+};
+
+/* =====================================================================
+   Top-level wiring
+   ===================================================================== */
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  $('#themeToggle').textContent = theme==='dark' ? '☀️' : '🌙';
+  state.theme = theme;
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function num(v){ const n=+v; return isNaN(n)?0:n; }
+function fmt(n){ if(typeof n!=='number')return n; const a=Math.abs(n); if(a>=1e6)return (n/1e6).toFixed(1)+'M'; if(a>=1e3)return (n/1e3).toFixed(1)+'K'; return n.toLocaleString(); }
+function truncate(s,n){ s=String(s); return s.length>n? s.slice(0,n)+'…':s; }
+function hexA(hex,a){ const h=hex.replace('#',''); return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${a})`; }
+
+function init() {
+  Chart.defaults.font.family = 'Inter';
+  Chart.defaults.color = softC();
+
+  $('#dashTitle').value = state.title || 'My Dashboard';
+  applyTheme(state.theme || 'light');
+
+  $('#dashTitle').addEventListener('change', save);
+  $('#themeToggle').onclick = ()=>{ applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'); Chart.defaults.color=softC(); renderAll(); save(); };
+  $('#shareBtn').onclick = ()=>{ $('#shareBtn').textContent='✓ Link copied'; setTimeout(()=>$('#shareBtn').innerHTML='🔗 Share',1600); };
+
+  $('#addFab').onclick = openModal;
+  $('#modalClose').onclick = closeModal;
+  $('#modalOverlay').onclick = closeModal;
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+  // close popovers on outside click
+  document.addEventListener('click', e=>{ if(!e.target.closest('.card-tools')) $$('.popover.open').forEach(p=>p.classList.remove('open')); });
+
+  renderAll();
+
+  // one-time pulse on the add button
+  if (!state.seenPulse) {
+    $('#addFab').classList.add('pulse');
+    state.seenPulse = true; save();
+    setTimeout(()=>$('#addFab').classList.remove('pulse'), 3000);
+  }
+
+  window.addEventListener('resize', ()=>Object.values(charts).forEach(c=>{try{c.resize()}catch(e){}}));
+}
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
