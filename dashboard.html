@@ -902,7 +902,8 @@ const API = {
   listDashboards() { return this._fetch('/api/dashboards'); },
   saveDashboard(d) { return this._fetch('/api/dashboards', { method: 'POST', body: JSON.stringify(d) }); },
   connectDb(cs) { return this._fetch('/api/connect', { method: 'POST', body: JSON.stringify({ connectionString: cs }) }); },
-  clearTable(table) { return this._fetch('/api/clear', { method: 'POST', body: JSON.stringify({ table }) }); }
+  clearTable(table) { return this._fetch('/api/clear', { method: 'POST', body: JSON.stringify({ table }) }); },
+  disconnect() { return this._fetch('/api/disconnect', { method: 'POST' }); }
 };
 function setBackendBadge(ok, engine) {
   const b = $('#backendBadge');
@@ -2519,8 +2520,10 @@ function init() {
     else if (document.querySelector('.widget.maximized')) restoreMaximize();
   });
 
-  // Probe the backend; upgrade to connected mode if reachable.
-  API.health()
+  // On every page load, end any DB connection left over from a previous
+  // session so a refresh never shows stale tables/columns from the last
+  // connection. Then probe the (now reset to sqlite) backend.
+  API.disconnect().catch(() => {}).then(() => API.health())
     .then(h => {
       BACKEND = true; setBackendBadge(true, h.engine);
       toast(`Backend connected — ${h.engine} engine`);

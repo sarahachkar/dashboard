@@ -250,6 +250,14 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (p === '/api/disconnect' && m === 'POST') {
+      // End any live DB connection and fall back to the default sqlite source.
+      // Called on every page load so a refresh never reuses a stale connection.
+      if (pgPool) { await pgPool.end().catch(() => {}); pgPool = null; }
+      activeSource = 'sqlite';
+      return sendJson(res, 200, { ok: true, engine: 'sqlite' });
+    }
+
     if (p.startsWith('/api/'))
       return sendJson(res, 404, { error: 'Unknown endpoint' });
 
