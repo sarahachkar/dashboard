@@ -1,7 +1,8 @@
-# runtime database (regenerated on first run)
-nexus.db
-nexus.db-*
-# deps & local
 node_modules/
+nexus.db
+nexus.db-journal
+*.log
+tempCodeRunnerFile.js
+.env
 .DS_Store
 .claude/
