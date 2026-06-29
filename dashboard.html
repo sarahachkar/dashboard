@@ -43,7 +43,7 @@
   --grad-c: #ff5e7a;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; height: 100%; }
+html, body { margin: 0; padding: 0; height: 100%; overflow-x: hidden; max-width: 100%; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -51,7 +51,11 @@ body {
   font-size: 14px;
   transition: background .3s, color .3s;
   padding-top: var(--headerH, 110px);   /* room for the fixed header chrome */
+  -webkit-text-size-adjust: 100%;        /* don't let mobile Safari inflate text */
 }
+/* momentum scrolling on every scroll container (smooth on iOS) */
+.sidebar, .preview-wrap, .dt-wrap, .manual-wrap, .br-cols, .bds-chips,
+.view-tabs, .builder { -webkit-overflow-scrolling: touch; }
 button { font-family: inherit; cursor: pointer; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -562,15 +566,38 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   /* Widget footer */
   .w-foot { flex-wrap: wrap; gap: 8px; }
   .w-config { width: 100%; }
+  .w-config .mini { min-width: calc(50% - 5px); }
 
   /* FAB */
   .add-card-fab { bottom: 20px; height: 44px; padding: 0 20px; font-size: 13px; }
+
+  /* Prevent iOS from zooming in when a form field is focused: any focusable
+     text control must be >= 16px. This is the single biggest mobile-jank fix. */
+  input, select, textarea,
+  .input, select.input, .binput, textarea.query,
+  .w-title, .dash-title, .w-config select, .w-config input { font-size: 16px; }
+
+  /* Bigger, finger-friendly tap targets */
+  .icon-btn { width: 36px; height: 36px; }
+  .btn.sm { padding: 9px 12px; }
+  .ds-tab { padding: 11px 4px; }
+  .br-chip, .bds-chip { padding: 7px 12px; }
+  .view-tab { padding: 10px 14px; }
+
+  /* Maximized widget: use the whole screen, not a 28px inset */
+  .widget.maximized { inset: 8px; }
+
+  /* Filter bar stacks cleanly */
+  .filterbar { gap: 8px; padding: 10px; }
+  .filterbar .field { flex: 1 1 100%; }
+  .searchbox { min-width: 0; }
 }
 
 /* Small phones: ≤ 400px */
 @media (max-width: 400px) {
   .toolbar { padding: 8px 10px; gap: 6px; }
-  .dash-title { width: 100px; font-size: 13px; }
+  .dash-title { width: 110px; font-size: 16px; }   /* 16px: stay zoom-safe */
+  #rowBadge { display: none; }                      /* free up toolbar room */
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .brow { grid-template-columns: 1fr; }
   .btype-grid { grid-template-columns: repeat(2, 1fr); }
@@ -2493,10 +2520,14 @@ function init() {
     }
   });
 
-  // Reset on resize
-  window.addEventListener('resize', () => {
+  // Reset on resize + keep the fixed-header offsets exact after rotation
+  let _resizeT;
+  const onResize = () => {
     if (window.innerWidth > 768) $('#sidebar').classList.remove('mobile-open');
-  });
+    syncStickyOffsets();
+  };
+  window.addEventListener('resize', () => { clearTimeout(_resizeT); _resizeT = setTimeout(onResize, 120); });
+  window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
 
   // filters
   $('#timeRange').onchange = ()=>{ renderGrid(); };
