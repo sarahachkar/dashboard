@@ -48,8 +48,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboards (
   owner_id INTEGER NOT NULL,
   title TEXT NOT NULL,
   state_json TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'private',
+  share_token TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
+)`);
+// migrate older DBs that predate newer columns
+try {
+  const cols = db.prepare('PRAGMA table_info(dashboards)').all().map(c => c.name);
+  if (!cols.includes('visibility')) db.exec("ALTER TABLE dashboards ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'");
+  if (!cols.includes('share_token')) db.exec('ALTER TABLE dashboards ADD COLUMN share_token TEXT');
+} catch { /* fresh db already has them */ }
+// Per-user read-only grants: admin/owner grants a specific user view access.
+db.exec(`CREATE TABLE IF NOT EXISTS dashboard_grants (
+  dashboard_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  PRIMARY KEY (dashboard_id, user_id)
 )`);
 // Per-widget visibility exceptions. Default is visible; a row with
 // can_view=0 hides that widget from that user (used to hide graphs from
@@ -412,6 +426,14 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { user: u });
     }
 
+    /* ---------------- Public read-only share link (no login required) ------- */
+    if (p.startsWith('/api/shared/') && m === 'GET') {
+      const token = decodeURIComponent(p.slice('/api/shared/'.length));
+      const row = db.prepare('SELECT * FROM dashboards WHERE share_token=?').get(token);
+      if (!row) return sendJson(res, 404, { error: 'This shared link is invalid or has been revoked' });
+      return sendJson(res, 200, { id: row.id, title: row.title, state: safeParse(row.state_json), readOnly: true });
+    }
+
     /* ---------------- Session gate: every other /api/* needs a login ------- */
     const authUser = getSessionUser(req);
     if (p.startsWith('/api/') && !authUser)
@@ -488,7 +510,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { connections: rows.map(publicConn) });   // never includes password
     }
     if (p === '/api/connections' && m === 'POST') {
-      if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot add connections' });
+      // every signed-in user manages their own connections
       const b = await readBody(req);
       if (!b.host || !b.database) return sendJson(res, 400, { error: 'host and database are required' });
       const id = 'conn_' + crypto.randomBytes(6).toString('hex');
@@ -512,7 +534,6 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true });
       }
       if (action === 'connect' && m === 'POST') {
-        if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot open connections' });
         const Pool = getPg();
         if (!Pool) return sendJson(res, 500, { error: 'Postgres support not installed (npm install pg)' });
         const pool = new Pool({ connectionString: connectionString(row), connectionTimeoutMillis: 8000 });
@@ -552,51 +573,102 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 404, { error: 'Unknown connection endpoint' });
     }
 
-    /* ---------------- Dashboards (shared workspace, role-gated) ---------------- */
-    const canEdit = !!authUser && (authUser.role === 'admin' || authUser.role === 'editor');
+    /* ---------------- Dashboards (hybrid: private-by-default + sharing) ----------------
+       Model:
+        - Every user privately OWNS their dashboards and has full control of them.
+        - An owner may mark a dashboard 'shared' so others can view it.
+        - editor can edit others' shared dashboards; viewer can only view them.
+        - admin has full control over everything (sees/edits/deletes all, can
+          change any dashboard's visibility).
+    */
+    const isAdminUser = authUser && authUser.role === 'admin';
     if (p === '/api/dashboards' && m === 'GET') {
-      // Shared workspace: everyone sees the dashboard list (viewers get their
-      // widgets filtered on open). Owner id is included for edit/delete rights.
-      const rows = db.prepare('SELECT id,title,owner_id,created_at,updated_at FROM dashboards ORDER BY updated_at DESC').all();
-      return sendJson(res, 200, { dashboards: rows });
+      // Own dashboards + any shared-with-everyone + any granted to me (admins: all).
+      const rows = isAdminUser
+        ? db.prepare('SELECT id,title,owner_id,visibility,share_token,updated_at FROM dashboards ORDER BY updated_at DESC').all()
+        : db.prepare(`SELECT id,title,owner_id,visibility,share_token,updated_at FROM dashboards
+                      WHERE owner_id=? OR visibility='shared'
+                         OR id IN (SELECT dashboard_id FROM dashboard_grants WHERE user_id=?)
+                      ORDER BY updated_at DESC`).all(authUser.id, authUser.id);
+      return sendJson(res, 200, { dashboards: rows.map(r => ({ ...r, mine: r.owner_id === authUser.id })) });
     }
 
     if (p === '/api/dashboards' && m === 'POST') {
-      if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot create dashboards' });
+      // Anyone signed in can create their OWN dashboard (they fully own it).
       const d = await readBody(req);
       const id = 'dash_' + crypto.randomBytes(6).toString('hex');
       const now = Date.now();
-      db.prepare('INSERT INTO dashboards (id,owner_id,title,state_json,created_at,updated_at) VALUES (?,?,?,?,?,?)')
-        .run(id, authUser.id, String(d.title || 'Untitled dashboard'), JSON.stringify(d.state || {}), now, now);
-      return sendJson(res, 200, { id, title: d.title || 'Untitled dashboard', owner_id: authUser.id, created_at: now, updated_at: now });
+      const vis = d.visibility === 'shared' ? 'shared' : 'private';
+      db.prepare('INSERT INTO dashboards (id,owner_id,title,state_json,visibility,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
+        .run(id, authUser.id, String(d.title || 'Untitled dashboard'), JSON.stringify(d.state || {}), vis, now, now);
+      return sendJson(res, 200, { id, title: d.title || 'Untitled dashboard', owner_id: authUser.id, visibility: vis, created_at: now, updated_at: now });
     }
 
     if (p.startsWith('/api/dashboards/')) {
-      const id = decodeURIComponent(p.slice('/api/dashboards/'.length));
+      const parts = p.split('/');                 // ['', 'api', 'dashboards', ':id', 'action?']
+      const id = decodeURIComponent(parts[3] || '');
+      const action = parts[4] || '';
       const row = db.prepare('SELECT * FROM dashboards WHERE id=?').get(id);
       if (!row) return sendJson(res, 404, { error: 'Dashboard not found' });
       const isOwner = row.owner_id === authUser.id;
-      const mayEdit = canEdit || isOwner;     // admin, editor, or the owner
+      const isShared = row.visibility === 'shared';
+      const isGranted = !!db.prepare('SELECT 1 FROM dashboard_grants WHERE dashboard_id=? AND user_id=?').get(id, authUser.id);
+      const mayView = isOwner || isAdminUser || isShared || isGranted;
+      const mayEdit = isOwner || isAdminUser;      // only the owner or an admin can edit; everyone else is read-only
 
-      if (m === 'GET') {
-        // anyone signed in may view; viewers get denied widgets stripped out
-        const stateObj = filterStateForUser(safeParse(row.state_json), authUser);
-        return sendJson(res, 200, { id: row.id, title: row.title, state: stateObj, owner_id: row.owner_id, updated_at: row.updated_at });
+      /* --- base dashboard resource --- */
+      if (!action && m === 'GET') {
+        if (!mayView) return sendJson(res, 403, { error: 'You do not have access to this dashboard' });
+        const stateObj = filterStateForUser(safeParse(row.state_json), authUser);   // strip widgets hidden from this user
+        return sendJson(res, 200, { id: row.id, title: row.title, state: stateObj, owner_id: row.owner_id, visibility: row.visibility, share_token: (isOwner || isAdminUser) ? row.share_token : undefined, canEdit: mayEdit, updated_at: row.updated_at });
       }
-      if (m === 'PUT') {
-        if (authUser.role === 'viewer' || !mayEdit) return sendJson(res, 403, { error: 'You do not have permission to edit this dashboard' });
+      if (!action && m === 'PUT') {
+        if (!mayEdit) return sendJson(res, 403, { error: 'You do not have permission to edit this dashboard' });
         const d = await readBody(req);
         const title = d.title !== undefined ? String(d.title) : row.title;
         const stateJson = d.state !== undefined ? JSON.stringify(d.state) : row.state_json;
+        let vis = row.visibility;
+        if (d.visibility !== undefined) vis = d.visibility === 'shared' ? 'shared' : 'private';
         const now = Date.now();
-        db.prepare('UPDATE dashboards SET title=?, state_json=?, updated_at=? WHERE id=?').run(title, stateJson, now, id);
-        return sendJson(res, 200, { ok: true, id, updated_at: now });
+        db.prepare('UPDATE dashboards SET title=?, state_json=?, visibility=?, updated_at=? WHERE id=?').run(title, stateJson, vis, now, id);
+        return sendJson(res, 200, { ok: true, id, visibility: vis, updated_at: now });
       }
-      if (m === 'DELETE') {
-        if (!(authUser.role === 'admin' || isOwner)) return sendJson(res, 403, { error: 'Only the owner or an admin can delete this dashboard' });
+      if (!action && m === 'DELETE') {
+        if (!mayEdit) return sendJson(res, 403, { error: 'Only the owner or an admin can delete this dashboard' });
         db.prepare('DELETE FROM dashboards WHERE id=?').run(id);
+        db.prepare('DELETE FROM dashboard_grants WHERE dashboard_id=?').run(id);
         return sendJson(res, 200, { ok: true });
       }
+
+      /* --- share link (owner/admin) --- */
+      if (action === 'share') {
+        if (!mayEdit) return sendJson(res, 403, { error: 'Only the owner or an admin can share' });
+        if (m === 'POST') {                        // create/rotate a public read-only link
+          const token = 'shr_' + crypto.randomBytes(12).toString('hex');
+          db.prepare('UPDATE dashboards SET share_token=? WHERE id=?').run(token, id);
+          return sendJson(res, 200, { share_token: token });
+        }
+        if (m === 'DELETE') {                       // revoke
+          db.prepare('UPDATE dashboards SET share_token=NULL WHERE id=?').run(id);
+          return sendJson(res, 200, { ok: true });
+        }
+      }
+
+      /* --- per-user read-only grants (owner/admin) --- */
+      if (action === 'grants') {
+        if (!mayEdit) return sendJson(res, 403, { error: 'Only the owner or an admin can manage access' });
+        if (m === 'GET') {
+          const ids = db.prepare('SELECT user_id FROM dashboard_grants WHERE dashboard_id=?').all(id).map(r => r.user_id);
+          return sendJson(res, 200, { user_ids: ids });
+        }
+        if (m === 'POST') {
+          const { user_id, granted } = await readBody(req);
+          if (granted) db.prepare('INSERT OR IGNORE INTO dashboard_grants (dashboard_id,user_id) VALUES (?,?)').run(id, Number(user_id));
+          else db.prepare('DELETE FROM dashboard_grants WHERE dashboard_id=? AND user_id=?').run(id, Number(user_id));
+          return sendJson(res, 200, { ok: true });
+        }
+      }
+      return sendJson(res, 404, { error: 'Unknown dashboard endpoint' });
     }
 
     if (p === '/api/clear' && m === 'POST') {
@@ -636,14 +708,15 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 404, { error: 'Unknown endpoint' });
 
     /* ---------------- Static files ---------------- */
-    // Pretty routes for the auth pages
+    // Pretty routes
     let rel = p;
     if (p === '/' )       rel = '/dashboard.html';
     else if (p === '/login')  rel = '/login.html';
     else if (p === '/signup') rel = '/signup.html';
+    else if (p.startsWith('/view/')) rel = '/dashboard.html';   // public read-only share link
 
-    // The dashboard requires a logged-in session; bounce guests to /login.
-    if (rel === '/dashboard.html' && !authUser) {
+    // The dashboard requires login — EXCEPT the public /view/<token> read-only route.
+    if (rel === '/dashboard.html' && !authUser && !p.startsWith('/view/')) {
       res.writeHead(302, { Location: '/login' });
       return res.end();
     }
