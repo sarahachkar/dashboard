@@ -58,6 +58,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS widget_permissions (
   can_view INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (widget_id, user_id)
 )`);
+db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
+// Saved database connections (credentials encrypted at rest, never echoed).
+db.exec(`CREATE TABLE IF NOT EXISTS connections (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  engine TEXT NOT NULL DEFAULT 'postgres',
+  host TEXT, port INTEGER, database TEXT, username TEXT,
+  password_encrypted TEXT,
+  created_at INTEGER NOT NULL
+)`);
 
 /* Tables that are app-internal, not user data sources */
 const INTERNAL = new Set(['app_dashboards', 'sqlite_sequence']);
@@ -290,6 +301,49 @@ function collectAllWidgets() {
 }
 
 /* =====================================================================
+   Saved DB connections — AES-256-GCM encryption at rest + live pool registry
+   ===================================================================== */
+const ENC_KEY = (() => {
+  let row = db.prepare('SELECT value FROM app_meta WHERE key=?').get('enc_key');
+  if (!row) {
+    const k = process.env.APP_SECRET
+      ? crypto.createHash('sha256').update(process.env.APP_SECRET).digest('hex')
+      : crypto.randomBytes(32).toString('hex');
+    db.prepare('INSERT INTO app_meta (key,value) VALUES (?,?)').run('enc_key', k);
+    row = { value: k };
+  }
+  return Buffer.from(row.value, 'hex');
+})();
+function encrypt(plain) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv);
+  const enc = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  return [iv.toString('hex'), cipher.getAuthTag().toString('hex'), enc.toString('hex')].join(':');
+}
+function decrypt(blob) {
+  try {
+    const [iv, tag, data] = String(blob).split(':');
+    const d = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, Buffer.from(iv, 'hex'));
+    d.setAuthTag(Buffer.from(tag, 'hex'));
+    return d.update(Buffer.from(data, 'hex'), undefined, 'utf8') + d.final('utf8');
+  } catch { return ''; }
+}
+
+const livePools = new Map();   // connection id -> pg Pool
+const connStatus = id => (livePools.has(id) ? 'connected' : 'disconnected');
+// public shape — NEVER includes the password
+const publicConn = r => ({ id: r.id, name: r.name, engine: r.engine, host: r.host, port: r.port, database: r.database, username: r.username, status: connStatus(r.id) });
+function connectionString(r) {
+  const pw = r.password_encrypted ? decrypt(r.password_encrypted) : '';
+  const auth = r.username ? encodeURIComponent(r.username) + (pw ? ':' + encodeURIComponent(pw) : '') + '@' : '';
+  return `postgres://${auth}${r.host || 'localhost'}:${r.port || 5432}/${r.database || 'postgres'}`;
+}
+function getPg() {
+  try { return require('pg').Pool; }
+  catch { return null; }
+}
+
+/* =====================================================================
    Server
    ===================================================================== */
 const server = http.createServer(async (req, res) => {
@@ -423,6 +477,76 @@ const server = http.createServer(async (req, res) => {
       }
 
       return sendJson(res, 404, { error: 'Unknown admin endpoint' });
+    }
+
+    /* ---------------- Saved DB connections (multi-connection) ---------------- */
+    if (p === '/api/connections' && m === 'GET') {
+      const rows = db.prepare('SELECT * FROM connections WHERE user_id=? ORDER BY created_at').all(authUser.id);
+      return sendJson(res, 200, { connections: rows.map(publicConn) });   // never includes password
+    }
+    if (p === '/api/connections' && m === 'POST') {
+      if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot add connections' });
+      const b = await readBody(req);
+      if (!b.host || !b.database) return sendJson(res, 400, { error: 'host and database are required' });
+      const id = 'conn_' + crypto.randomBytes(6).toString('hex');
+      db.prepare(`INSERT INTO connections (id,user_id,name,engine,host,port,database,username,password_encrypted,created_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .run(id, authUser.id, String(b.name || b.database), 'postgres', String(b.host), Number(b.port) || 5432,
+             String(b.database), String(b.username || ''), b.password ? encrypt(b.password) : null, Date.now());
+      return sendJson(res, 200, { connection: publicConn(db.prepare('SELECT * FROM connections WHERE id=?').get(id)) });
+    }
+    if (p.startsWith('/api/connections/')) {
+      const parts = p.split('/');               // ['', 'api', 'connections', ':id', 'action?']
+      const cid = decodeURIComponent(parts[3] || '');
+      const action = parts[4] || '';
+      const row = db.prepare('SELECT * FROM connections WHERE id=?').get(cid);
+      if (!row) return sendJson(res, 404, { error: 'Connection not found' });
+      if (row.user_id !== authUser.id && authUser.role !== 'admin') return sendJson(res, 403, { error: 'Forbidden' });
+
+      if (!action && m === 'DELETE') {
+        const pool = livePools.get(cid); if (pool) { await pool.end().catch(() => {}); livePools.delete(cid); }
+        db.prepare('DELETE FROM connections WHERE id=?').run(cid);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (action === 'connect' && m === 'POST') {
+        if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot open connections' });
+        const Pool = getPg();
+        if (!Pool) return sendJson(res, 500, { error: 'Postgres support not installed (npm install pg)' });
+        const pool = new Pool({ connectionString: connectionString(row), connectionTimeoutMillis: 8000 });
+        try {
+          await pool.query('SELECT 1');
+          const old = livePools.get(cid); if (old) await old.end().catch(() => {});
+          livePools.set(cid, pool);
+          return sendJson(res, 200, { status: 'connected', connection: publicConn(row) });
+        } catch (e) {
+          await pool.end().catch(() => {});
+          return sendJson(res, 400, { error: 'Connection failed: ' + e.message });   // note: e.message never contains the password
+        }
+      }
+      if (action === 'disconnect' && m === 'POST') {
+        const pool = livePools.get(cid); if (pool) { await pool.end().catch(() => {}); livePools.delete(cid); }
+        return sendJson(res, 200, { status: 'disconnected' });
+      }
+      if (action === 'tables' && m === 'GET') {
+        const pool = livePools.get(cid);
+        if (!pool) return sendJson(res, 409, { error: 'Connection is not active' });
+        const t = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name`);
+        const out = [];
+        for (const tr of t.rows) {
+          const c = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position`, [tr.table_name]);
+          out.push({ name: tr.table_name, columns: c.rows.map(x => x.column_name) });
+        }
+        return sendJson(res, 200, { tables: out });
+      }
+      if (action === 'query' && m === 'POST') {
+        const pool = livePools.get(cid);
+        if (!pool) return sendJson(res, 409, { error: 'Connection is not active' });
+        const { sql } = await readBody(req);
+        if (!isReadOnly(sql)) return sendJson(res, 400, { error: 'Only read-only SELECT queries are allowed.' });
+        const r = await pool.query(sql);
+        return sendJson(res, 200, { rows: r.rows });
+      }
+      return sendJson(res, 404, { error: 'Unknown connection endpoint' });
     }
 
     /* ---------------- Dashboards (shared workspace, role-gated) ---------------- */

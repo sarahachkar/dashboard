@@ -135,6 +135,19 @@ button { font-family: inherit; cursor: pointer; }
 .user-role { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-2); font-weight: 600; }
 @media (max-width: 768px) { .user-meta { display: none; } .user-chip { padding: 3px; } }
 
+/* ===== Connection manager ===== */
+.conn-list { display: flex; flex-direction: column; gap: 8px; }
+.conn-empty { font-size: 12.5px; color: var(--text-dim); padding: 6px 2px; }
+.conn-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+.conn-item .ci-info { flex: 1; min-width: 0; }
+.conn-item .ci-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.conn-item .ci-detail { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conn-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.conn-dot.connected { background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); }
+.conn-dot.disconnected { background: var(--text-dim); }
+.conn-item .ci-actions { display: flex; gap: 6px; }
+.conn-item .ci-actions .btn { padding: 5px 10px; font-size: 12px; }
+
 /* ===== Admin panel ===== */
 .admin-users { display: flex; flex-direction: column; gap: 8px; }
 .admin-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
@@ -786,6 +799,14 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
         <span class="bdata-chevron">▼</span>
       </div>
       <div class="bdata-body">
+        <!-- Connection source selector -->
+        <div class="bds-browse-row full" style="margin-bottom:10px">
+          <div>
+            <div class="bds-small-label">Data connection</div>
+            <select class="binput" id="bdConnSelect" style="width:100%"><option value="">Sample data (built-in)</option></select>
+          </div>
+        </div>
+
         <!-- mini tabs -->
         <div class="bds-tabs">
           <button class="bds-tab active" data-bpane="browse">Browse</button>
@@ -866,12 +887,26 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 
 <!-- ===== Connect DB modal ===== -->
 <div class="modal-overlay" id="connectOverlay">
-  <div class="builder" role="dialog" aria-modal="true" style="width:min(460px,96vw)">
+  <div class="builder" role="dialog" aria-modal="true" style="width:min(560px,96vw)">
     <div class="builder-head">
-      <h2>Connect to a database</h2>
+      <h2>Database connections</h2>
       <button class="icon-btn" id="connectClose" title="Close">Close</button>
     </div>
-    <div class="hint" style="margin-top:0;margin-bottom:16px">Enter your PostgreSQL credentials to connect.</div>
+
+    <div class="bfield-label" style="margin-bottom:8px">Your connections</div>
+    <div id="connList" class="conn-list"></div>
+
+    <div class="bfield-label" style="margin:22px 0 8px">Add a connection</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div>
+        <label class="conn-label">Name</label>
+        <input class="input" id="connName" placeholder="Production DB" style="width:100%">
+      </div>
+      <div>
+        <label class="conn-label">Database name</label>
+        <input class="input" id="connDb" placeholder="mydb" style="width:100%">
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 100px;gap:10px;margin-bottom:10px">
       <div>
         <label class="conn-label">IP / Host</label>
@@ -882,11 +917,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
         <input class="input" id="connPort" placeholder="5432" style="width:100%">
       </div>
     </div>
-    <div style="margin-bottom:10px">
-      <label class="conn-label">Database name</label>
-      <input class="input" id="connDb" placeholder="mydb" style="width:100%">
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div>
         <label class="conn-label">Username</label>
         <input class="input" id="connUser" placeholder="postgres" style="width:100%">
@@ -896,7 +927,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
         <input class="input" id="connPass" type="password" placeholder="••••••••" style="width:100%">
       </div>
     </div>
-    <button class="btn primary" id="connectDbBtn" style="width:100%;padding:11px;font-size:14px">Connect</button>
+    <button class="btn primary" id="connectDbBtn" style="width:100%;padding:11px;font-size:14px">Save &amp; Connect</button>
     <div id="connStatus" style="margin-top:12px;font-size:12px;display:none;padding:10px 12px;border-radius:8px"></div>
   </div>
 </div>
@@ -967,7 +998,15 @@ const API = {
   deleteDashboard(id) { return this._fetch('/api/dashboards/' + id, { method: 'DELETE' }); },
   connectDb(cs) { return this._fetch('/api/connect', { method: 'POST', body: JSON.stringify({ connectionString: cs }) }); },
   clearTable(table) { return this._fetch('/api/clear', { method: 'POST', body: JSON.stringify({ table }) }); },
-  disconnect() { return this._fetch('/api/disconnect', { method: 'POST' }); }
+  disconnect() { return this._fetch('/api/disconnect', { method: 'POST' }); },
+  // Multi-connection management
+  listConnections() { return this._fetch('/api/connections'); },
+  addConnection(c) { return this._fetch('/api/connections', { method: 'POST', body: JSON.stringify(c) }); },
+  connectConnection(id) { return this._fetch('/api/connections/' + id + '/connect', { method: 'POST' }); },
+  disconnectConnection(id) { return this._fetch('/api/connections/' + id + '/disconnect', { method: 'POST' }); },
+  deleteConnection(id) { return this._fetch('/api/connections/' + id, { method: 'DELETE' }); },
+  connTables(id) { return this._fetch('/api/connections/' + id + '/tables'); },
+  connQuery(id, sql) { return this._fetch('/api/connections/' + id + '/query', { method: 'POST', body: JSON.stringify({ sql }) }); }
 };
 function setBackendBadge(ok, engine) {
   const b = $('#backendBadge');
@@ -1553,7 +1592,13 @@ function reorder(fromId, toId) {
    ===================================================================== */
 function widgetSubtitle(w, count) {
   const label = (CHART_TYPES.find(t=>t[0]===w.type)||[,'Chart'])[1];
-  return `${label} · ${count} ${count===1?'data point':'data points'}`;
+  let sub = `${label} · ${count} ${count===1?'data point':'data points'}`;
+  // Flag widgets whose source DB connection is no longer connected
+  if (w.connectionId) {
+    const c = connById(w.connectionId);
+    if (!c || c.status !== 'connected') sub += ' · ⚠ source disconnected';
+  }
+  return sub;
 }
 function emptyStateHTML() {
   return `<div class="w-empty">
@@ -1970,6 +2015,7 @@ let builderTarget = null;   // widget id when editing, null when creating
 let builderDraft = null;
 let builderChart = null;
 let builderDataset = null;  // dataset local to the builder (may differ from global)
+let builderConnId = null;   // which saved connection the builder's data came from ('' / null = built-in)
 let bdManualModel = null;
 
 /* ── Toggle the data section open/closed ── */
@@ -1996,7 +2042,13 @@ function initBdsTabs() {
 async function refreshBdBrowseTables() {
   const sel = $('#bdBrTable');
   if (!sel) return;
-  const tables = BACKEND ? (await API.tables().catch(()=>({tables:[]})).then(r=>r.tables||[])) : Object.keys(localTables()).map(n=>({name:n,columns:localTables()[n]}));
+  const connId = activeBuilderConn();
+  let tables = [];
+  try {
+    if (connId) tables = (await API.connTables(connId)).tables || [];
+    else tables = BACKEND ? ((await API.tables().catch(() => ({ tables: [] }))).tables || []) : Object.keys(localTables()).map(n => ({ name: n, columns: localTables()[n] }));
+  } catch (e) { setBdStatus('bdBrStatus', '✖ ' + e.message, true); }
+  tables.forEach(t => { if (t && t.name) browseTables[t.name] = t.columns || []; });
   sel.innerHTML = tables.map(t => `<option value="${escapeHtml(t.name||t)}">${escapeHtml(t.name||t)}</option>`).join('');
   refreshBdBrColumns();
 }
@@ -2028,8 +2080,10 @@ async function bdBrowseLoad() {
   }
   setBdStatus('bdBrStatus', 'Loading…');
   try {
-    const res = BACKEND ? await API.query(sql) : runQuery(sql);
-    builderDataset = BACKEND ? normalizeRows(res.rows) : res;
+    const connId = activeBuilderConn();
+    builderDataset = connId ? normalizeRows((await API.connQuery(connId, sql)).rows)
+                            : (BACKEND ? normalizeRows((await API.query(sql)).rows) : runQuery(sql));
+    builderConnId = connId || null;
     setBdStatus('bdBrStatus', `✓ ${builderDataset.rows.length} rows loaded`, false);
     onBuilderDataLoaded();
   } catch(e) { setBdStatus('bdBrStatus', '✖ ' + e.message, true); }
@@ -2041,8 +2095,12 @@ async function bdQueryRun() {
   if (!text) return;
   setBdStatus('bdQueryStatus', 'Running…');
   try {
-    const res = BACKEND && /select|from/i.test(text) ? normalizeRows((await API.query(text)).rows) : runQuery(text);
+    const connId = activeBuilderConn();
+    let res;
+    if (connId) res = normalizeRows((await API.connQuery(connId, text)).rows);
+    else res = BACKEND && /select|from/i.test(text) ? normalizeRows((await API.query(text)).rows) : runQuery(text);
     builderDataset = res;
+    builderConnId = connId || null;
     setBdStatus('bdQueryStatus', `✓ ${res.rows.length} rows loaded`, false);
     onBuilderDataLoaded();
   } catch(e) { setBdStatus('bdQueryStatus', '✖ ' + e.message, true); }
@@ -2056,6 +2114,7 @@ function bdManualLoad() {
     return o;
   });
   builderDataset = normalizeRows(rows);
+  builderConnId = null;   // manually-entered data isn't tied to a connection
   setBdStatus('bdMStatus', `✓ ${builderDataset.rows.length} rows loaded`, false);
   onBuilderDataLoaded();
 }
@@ -2121,7 +2180,9 @@ function openBuilder(existing, presetType) {
   builderTarget = existing ? existing.id : null;
   // If widget has its own saved dataset, restore it
   builderDataset = existing?.savedDataset ? existing.savedDataset : ds;
+  builderConnId = existing?.connectionId || null;
   bdManualModel = null;
+  refreshBdConnSelect();   // reflect currently-connected databases
 
   const cols = builderDataset ? builderDataset.columns : (ds ? ds.columns : []);
   const cats = cols.filter(c => { const vs = (builderDataset||ds||{rows:[]}).rows.map(r=>r[c]).filter(v=>v!=null); return vs.length && !vs.every(v=>typeof v==='number'); });
@@ -2247,6 +2308,7 @@ function saveBuilder() {
   if (!d.title || !d.title.trim()) d.title = 'Untitled graph';
   // Attach the builder's own dataset to the widget so it renders independently
   if (builderDataset) d.savedDataset = builderDataset;
+  d.connectionId = builderConnId || null;   // remember which connection fed this widget
   // Also push to global dataset if there's no global data yet
   if (builderDataset && !dataset.rows.length) {
     dataset = builderDataset;
@@ -2525,6 +2587,76 @@ function applyRoleUI() {
 }
 
 /* =====================================================================
+   Multi-database connections
+   ===================================================================== */
+let connections = [];   // [{id,name,host,port,database,username,status}]
+function setConnStatus(msg, isErr) {
+  const st = $('#connStatus'); if (!st) return;
+  st.style.display = 'block'; st.textContent = msg;
+  st.style.background = isErr ? 'color-mix(in srgb, var(--danger) 12%, transparent)' : 'var(--panel-2)';
+  st.style.color = isErr ? 'var(--danger)' : 'var(--text-dim)';
+}
+function connectedConnections() { return connections.filter(c => c.status === 'connected'); }
+function connById(id) { return connections.find(c => c.id === id); }
+
+async function loadConnections() {
+  try {
+    const { connections: c } = await API.listConnections();
+    connections = c || [];
+    renderConnections();
+    refreshBdConnSelect();
+  } catch (e) { /* not fatal */ }
+}
+
+function renderConnections() {
+  const wrap = $('#connList'); if (!wrap) return;
+  if (!connections.length) { wrap.innerHTML = '<div class="conn-empty">No saved connections yet. Add one below.</div>'; return; }
+  wrap.innerHTML = connections.map(c => `
+    <div class="conn-item" data-cid="${c.id}">
+      <span class="conn-dot ${c.status}"></span>
+      <div class="ci-info">
+        <div class="ci-name">${escapeHtml(c.name)}</div>
+        <div class="ci-detail">${escapeHtml(c.username ? c.username + '@' : '')}${escapeHtml(c.host)}:${c.port}/${escapeHtml(c.database)}</div>
+      </div>
+      <div class="ci-actions">
+        ${c.status === 'connected'
+          ? `<button class="btn sm" data-act="disconnect">Disconnect</button>`
+          : `<button class="btn sm primary" data-act="connect">Connect</button>`}
+        <button class="btn sm" data-act="delete" title="Delete connection">🗑</button>
+      </div>
+    </div>`).join('');
+  wrap.querySelectorAll('.conn-item').forEach(item => {
+    const id = item.dataset.cid;
+    const on = (sel, fn) => { const b = item.querySelector(sel); if (b) b.onclick = fn; };
+    on('[data-act="connect"]', async () => {
+      setConnStatus('Connecting…');
+      try { await API.connectConnection(id); setConnStatus('Connected!'); await loadConnections(); }
+      catch (e) { setConnStatus('Connect failed: ' + e.message, true); }
+    });
+    on('[data-act="disconnect"]', async () => {
+      try { await API.disconnectConnection(id); await loadConnections(); renderGrid(); toast('Disconnected'); }
+      catch (e) { toast('Failed: ' + e.message, true); }
+    });
+    on('[data-act="delete"]', async () => {
+      if (!confirm('Delete this connection?')) return;
+      try { await API.deleteConnection(id); await loadConnections(); renderGrid(); }
+      catch (e) { toast('Failed: ' + e.message, true); }
+    });
+  });
+}
+
+// Populate the builder's connection selector: built-in sqlite + connected DBs
+function refreshBdConnSelect() {
+  const sel = $('#bdConnSelect'); if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = `<option value="">Sample data (built-in)</option>` +
+    connectedConnections().map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  if (prev && connectedConnections().some(c => c.id === prev)) sel.value = prev;
+}
+// The builder's currently selected data source ('' = built-in sqlite)
+function activeBuilderConn() { const sel = $('#bdConnSelect'); return sel ? sel.value : ''; }
+
+/* =====================================================================
    Admin panel — manage roles + per-user widget visibility (admin only)
    ===================================================================== */
 let adminUsersCache = [], adminWidgetsCache = [];
@@ -2619,43 +2751,37 @@ function init() {
   // the graph builder. We still prime the shared table list the builder reads.
   refreshBrowseTables();
 
-  // ── Connect DB modal (opened from the header button) ──
+  // ── Connect DB modal (multi-connection manager) ──
   const connectOverlay = $('#connectOverlay');
-  const openConnect  = () => connectOverlay.classList.add('open');
+  const openConnect  = () => { connectOverlay.classList.add('open'); loadConnections(); };
   const closeConnect = () => connectOverlay.classList.remove('open');
   $('#openConnectBtn').onclick = openConnect;
   $('#connectClose').onclick = closeConnect;
   connectOverlay.addEventListener('click', e => { if (e.target.id === 'connectOverlay') closeConnect(); });
 
+  // Save & connect a new connection (keeps existing ones live)
   $('#connectDbBtn').onclick = async () => {
-    const host = $('#connHost').value.trim() || 'localhost';
-    const port = $('#connPort').value.trim() || '5432';
-    const db   = $('#connDb').value.trim() || 'postgres';
-    const user = $('#connUser').value.trim();
-    const pass = $('#connPass').value.trim();
-    let url = 'postgres://';
-    if (user) { url += encodeURIComponent(user); if (pass) url += ':' + encodeURIComponent(pass); url += '@'; }
-    url += host + ':' + port + '/' + db;
-    const st = $('#connStatus');
-    st.style.display = 'block';
-    st.style.background = 'var(--panel-2)';
-    st.style.color = 'var(--text-dim)';
-    st.textContent = 'Connecting...';
+    const body = {
+      name: $('#connName').value.trim(),
+      host: $('#connHost').value.trim(),
+      port: $('#connPort').value.trim() || 5432,
+      database: $('#connDb').value.trim(),
+      username: $('#connUser').value.trim(),
+      password: $('#connPass').value
+    };
+    if (!body.host || !body.database) return setConnStatus('Host and database are required', true);
+    setConnStatus('Saving…');
     try {
-      await API.connectDb(url);
-      BACKEND = true;
-      setBackendBadge(true, 'postgres');
-      st.style.background = 'color-mix(in srgb, var(--accent-2) 12%, transparent)';
-      st.style.color = 'var(--accent-2)';
-      st.textContent = 'Connected!';
-      toast('Database connected');
-      refreshBrowseTables();
-      setTimeout(closeConnect, 900);   // let the user see "Connected!" then close
-    } catch(e) {
-      st.style.background = 'color-mix(in srgb, var(--danger) 12%, transparent)';
-      st.style.color = 'var(--danger)';
-      st.textContent = 'Error: ' + e.message;
-    }
+      const { connection } = await API.addConnection(body);
+      setConnStatus('Connecting…');
+      try {
+        await API.connectConnection(connection.id);
+        setConnStatus('Connected!', false);
+      } catch (e) { setConnStatus('Saved, but connect failed: ' + e.message, true); }
+      ['connName','connHost','connPort','connDb','connUser','connPass'].forEach(id => $('#' + id).value = '');
+      await loadConnections();
+      BACKEND = true; setBackendBadge(true, 'postgres');
+    } catch (e) { setConnStatus('Error: ' + e.message, true); }
   };
 
 
@@ -2674,6 +2800,7 @@ function init() {
   // ── Builder inline data source wiring ──
   initBdataToggle();
   initBdsTabs();
+  $('#bdConnSelect').onchange = refreshBdBrowseTables;   // switch data source connection
   $('#bdBrTable').onchange = refreshBdBrColumns;
   $('#bdBrRun').onclick = bdBrowseLoad;
   $('#bdQueryRun').onclick = bdQueryRun;
@@ -2723,6 +2850,7 @@ function init() {
   renderAll();
   // Load this user's saved dashboards from the DB (replaces the initial render)
   loadDashboards();
+  loadConnections();   // populate saved DB connections + builder source selector
 
   syncStickyOffsets();
   window.addEventListener('resize', ()=>{ syncStickyOffsets(); Object.values(charts).forEach(c=>{try{c.resize()}catch(e){}}); });
