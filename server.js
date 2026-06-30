@@ -550,7 +550,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     /* ---------------- Dashboards (shared workspace, role-gated) ---------------- */
-    const canEdit = authUser.role === 'admin' || authUser.role === 'editor';
+    const canEdit = !!authUser && (authUser.role === 'admin' || authUser.role === 'editor');
     if (p === '/api/dashboards' && m === 'GET') {
       // Shared workspace: everyone sees the dashboard list (viewers get their
       // widgets filtered on open). Owner id is included for edit/delete rights.
