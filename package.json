@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node --experimental-sqlite server.js",
-    "dev": "node --watch --experimental-sqlite server.js"
+    "dev": "node --watch --experimental-sqlite server.js",
+    "reset": "node --experimental-sqlite reset-accounts.js"
   },
   "engines": {
     "node": ">=22.5.0"
