@@ -135,6 +135,38 @@ button { font-family: inherit; cursor: pointer; }
 .user-role { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-2); font-weight: 600; }
 @media (max-width: 768px) { .user-meta { display: none; } .user-chip { padding: 3px; } }
 
+/* ===== Admin panel ===== */
+.admin-users { display: flex; flex-direction: column; gap: 8px; }
+.admin-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+.admin-row .au-info { flex: 1; min-width: 0; }
+.admin-row .au-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.admin-row .au-email { font-size: 11.5px; color: var(--text-dim); }
+.admin-row select { background: var(--panel-2); color: var(--text); border: 1.5px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; outline: none; }
+.admin-row select:focus { border-color: var(--accent); }
+.admin-widgets { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto; }
+.admin-wrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 9px; }
+.admin-wrow .aw-title { font-size: 13px; color: var(--text); }
+.admin-wrow .aw-dash { font-size: 11px; color: var(--text-dim); }
+.admin-toggle { position: relative; width: 40px; height: 22px; flex: none; }
+.admin-toggle input { opacity: 0; width: 0; height: 0; }
+.admin-toggle .track { position: absolute; inset: 0; background: var(--border); border-radius: 999px; transition: background .15s; cursor: pointer; }
+.admin-toggle .track::before { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform .15s; }
+.admin-toggle input:checked + .track { background: var(--accent-2); }
+.admin-toggle input:checked + .track::before { transform: translateX(18px); }
+
+/* ===== Viewer role: read-only — hide all editing affordances ===== */
+body[data-role="viewer"] #newGraphBtn,
+body[data-role="viewer"] #openConnectBtn,
+body[data-role="viewer"] #newDashBtn,
+body[data-role="viewer"] #delDashBtn,
+body[data-role="viewer"] #saveIndicator,
+body[data-role="viewer"] .w-controls,
+body[data-role="viewer"] .w-foot,
+body[data-role="viewer"] .add-card-fab,
+body[data-role="viewer"] #viewTabs > button.btn,
+body[data-role="viewer"] .view-tab .x,
+body[data-role="viewer"] .empty-canvas .btn { display: none !important; }
+
 /* ===== Tabs (dashboard views) ===== */
 .view-tabs { display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; background: var(--panel); border-bottom: 1px solid rgba(124,92,252,0.25); position: fixed; top: var(--toolbarH, 56px); left: 0; right: 0; z-index: 45; }
 .layout.sb-collapsed .view-tabs, body:not(.has-sidebar) .view-tabs { left: 0; }
@@ -686,6 +718,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <button class="btn ghost sm" id="refreshBtn" title="Refresh all charts"><span class="btn-icon">↺</span><span class="btn-label">Refresh</span></button>
   <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
   <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">🛢</span><span class="btn-label">Connect DB</span></button>
+  <button class="btn ghost sm" id="adminBtn" title="Admin panel" style="display:none"><span class="btn-icon">⚙</span><span class="btn-label">Admin</span></button>
   <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
   <div class="user-chip" id="userChip" title="Signed in">
     <span class="user-avatar" id="userAvatar">?</span>
@@ -868,6 +901,24 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   </div>
 </div>
 
+<!-- ===== Admin panel modal ===== -->
+<div class="modal-overlay" id="adminOverlay">
+  <div class="builder" role="dialog" aria-modal="true" style="width:min(760px,96vw)">
+    <div class="builder-head">
+      <h2>Admin panel</h2>
+      <button class="icon-btn" id="adminClose" title="Close">Close</button>
+    </div>
+
+    <div class="bfield-label" style="margin-bottom:8px">Users &amp; roles</div>
+    <div id="adminUsers" class="admin-users"></div>
+
+    <div class="bfield-label" style="margin:22px 0 8px">Per-user widget visibility</div>
+    <div class="bhint" style="margin-bottom:10px">Pick a user, then toggle which graphs they're allowed to see. Off = hidden from that user.</div>
+    <select class="binput" id="adminPermUser" style="width:100%;margin-bottom:10px"></select>
+    <div id="adminWidgets" class="admin-widgets"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -885,6 +936,10 @@ const LS_KEY = 'nexus_dashboard_v2';
    ===================================================================== */
 const API_BASE = (location.protocol === 'file:') ? 'http://localhost:4000' : '';
 let BACKEND = false;          // becomes true once /api/health responds
+let currentUser = null;       // { id, email, name, role }
+const isViewer = () => currentUser && currentUser.role === 'viewer';
+const isAdmin  = () => currentUser && currentUser.role === 'admin';
+function requireEdit() { if (isViewer()) { toast('Read-only access — your role cannot edit', true); return false; } return true; }
 const API = {
   async _fetch(path, opts) {
     const r = await fetch(API_BASE + path, Object.assign({ headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' }, opts));
@@ -896,6 +951,11 @@ const API = {
   },
   me() { return this._fetch('/api/auth/me'); },
   logout() { return this._fetch('/api/auth/logout', { method: 'POST' }); },
+  adminUsers() { return this._fetch('/api/admin/users'); },
+  adminSetRole(id, role) { return this._fetch('/api/admin/users/' + id + '/role', { method: 'PUT', body: JSON.stringify({ role }) }); },
+  adminWidgets() { return this._fetch('/api/admin/widgets'); },
+  adminPermissions(userId) { return this._fetch('/api/admin/permissions?user_id=' + userId); },
+  adminSetPermission(user_id, widget_id, can_view) { return this._fetch('/api/admin/permissions', { method: 'POST', body: JSON.stringify({ user_id, widget_id, can_view }) }); },
   health() { return this._fetch('/api/health'); },
   query(sql) { return this._fetch('/api/query', { method: 'POST', body: JSON.stringify({ sql }) }); },
   tables() { return this._fetch('/api/tables'); },
@@ -1328,6 +1388,7 @@ function renderViewTabs() {
   c.appendChild(add);
 }
 function addView() {
+  if (!requireEdit()) return;
   state.views.push({ name:'View '+(state.views.length+1), widgets: defaultWidgets() });
   activeView = state.views.length-1; renderAll(); saveState();
 }
@@ -2055,6 +2116,7 @@ function bdCatCols()     { return (builderDataset || dataset).columns.filter(c =
 function activeBuilderDataset() { return builderDataset || (dataset.rows.length ? dataset : null); }
 
 function openBuilder(existing, presetType) {
+  if (!requireEdit()) return;
   const ds = dataset.rows.length ? dataset : null;
   builderTarget = existing ? existing.id : null;
   // If widget has its own saved dataset, restore it
@@ -2255,6 +2317,7 @@ function openDataPanel() {
 }
 window.openDataPanel = openDataPanel;
 function removeWidget(id) {
+  if (!requireEdit()) return;
   const ws = widgets();
   const i = ws.findIndex(w=>w.id===id);
   if (i>=0){ ws.splice(i,1); if(charts[id]){try{charts[id].destroy()}catch(e){}delete charts[id];} renderGrid(); saveState(); }
@@ -2441,14 +2504,101 @@ function renderAll(){ renderViewTabs(); renderGrid(); syncStickyOffsets(); }
 async function loadCurrentUser() {
   try {
     const { user } = await API.me();
+    currentUser = user;
     const name = user.name || user.email;
     $('#userName').textContent = name;
     $('#userRole').textContent = user.role;
     $('#userAvatar').textContent = (name || '?').trim().charAt(0) || '?';
     $('#userChip').title = `${name} · ${user.role}`;
+    applyRoleUI();
   } catch (e) {
     location.href = '/login';   // not authenticated
   }
+}
+
+/* Hide/disable editing controls based on role. Backend enforces this too. */
+function applyRoleUI() {
+  const role = (currentUser && currentUser.role) || 'viewer';
+  document.body.dataset.role = role;
+  const adminBtn = $('#adminBtn'); if (adminBtn) adminBtn.style.display = role === 'admin' ? '' : 'none';
+  const title = $('#dashTitle'); if (title) title.readOnly = role === 'viewer';
+}
+
+/* =====================================================================
+   Admin panel — manage roles + per-user widget visibility (admin only)
+   ===================================================================== */
+let adminUsersCache = [], adminWidgetsCache = [];
+async function openAdmin() {
+  if (!isAdmin()) return;
+  $('#adminOverlay').classList.add('open');
+  try { await renderAdminUsers(); await renderAdminWidgets(); }
+  catch (e) { toast('Admin load failed: ' + e.message, true); }
+}
+function closeAdmin() { $('#adminOverlay').classList.remove('open'); }
+
+async function renderAdminUsers() {
+  const { users } = await API.adminUsers();
+  adminUsersCache = users;
+  const wrap = $('#adminUsers');
+  wrap.innerHTML = users.map(u => `
+    <div class="admin-row">
+      <div class="au-info">
+        <div class="au-name">${escapeHtml(u.name || '(no name)')}${u.id === currentUser.id ? ' <span style="color:var(--text-dim);font-weight:400">(you)</span>' : ''}</div>
+        <div class="au-email">${escapeHtml(u.email)}</div>
+      </div>
+      <select data-role-for="${u.id}">
+        ${['admin','editor','viewer'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+      </select>
+    </div>`).join('');
+  wrap.querySelectorAll('select[data-role-for]').forEach(sel => {
+    sel.onchange = async () => {
+      const uid = +sel.dataset.roleFor;
+      try {
+        await API.adminSetRole(uid, sel.value);
+        const u = adminUsersCache.find(x => x.id === uid); if (u) u.role = sel.value;
+        populateAdminPermUser();
+        toast('Role updated');
+      } catch (e) { toast('Failed: ' + e.message, true); renderAdminUsers(); }
+    };
+  });
+  populateAdminPermUser();
+}
+
+function populateAdminPermUser() {
+  const sel = $('#adminPermUser'); if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = adminUsersCache.map(u => `<option value="${u.id}">${escapeHtml(u.name || u.email)} — ${u.role}</option>`).join('');
+  if (prev && adminUsersCache.some(u => String(u.id) === prev)) sel.value = prev;
+}
+
+async function renderAdminWidgets() {
+  const { widgets } = await API.adminWidgets();
+  adminWidgetsCache = widgets;
+  $('#adminPermUser').onchange = refreshAdminWidgetToggles;
+  await refreshAdminWidgetToggles();
+}
+
+async function refreshAdminWidgetToggles() {
+  const uid = +$('#adminPermUser').value;
+  const wrap = $('#adminWidgets');
+  if (!uid) { wrap.innerHTML = '<div class="bhint">No users.</div>'; return; }
+  if (!adminWidgetsCache.length) { wrap.innerHTML = '<div class="bhint">No graphs created yet.</div>'; return; }
+  const { permissions } = await API.adminPermissions(uid);
+  const denied = new Set(permissions.filter(p => !p.can_view).map(p => p.widget_id));
+  wrap.innerHTML = adminWidgetsCache.map(w => `
+    <div class="admin-wrow">
+      <div><div class="aw-title">${escapeHtml(w.title)}</div><div class="aw-dash">${escapeHtml(w.dashboard_title)}</div></div>
+      <label class="admin-toggle">
+        <input type="checkbox" data-wid="${escapeHtml(w.widget_id)}" ${denied.has(w.widget_id) ? '' : 'checked'}>
+        <span class="track"></span>
+      </label>
+    </div>`).join('');
+  wrap.querySelectorAll('input[data-wid]').forEach(cb => {
+    cb.onchange = async () => {
+      try { await API.adminSetPermission(uid, cb.dataset.wid, cb.checked); }
+      catch (e) { toast('Failed: ' + e.message, true); cb.checked = !cb.checked; }
+    };
+  });
 }
 
 function init() {
@@ -2511,6 +2661,9 @@ function init() {
 
   // toolbar
   $('#newGraphBtn').onclick = ()=> openBuilder();
+  $('#adminBtn').onclick = openAdmin;
+  $('#adminClose').onclick = closeAdmin;
+  $('#adminOverlay').addEventListener('click', e=>{ if (e.target.id==='adminOverlay') closeAdmin(); });
   $('#builderClose').onclick = closeBuilder;
   $('#builderCancel').onclick = closeBuilder;
   $('#builderSave').onclick = saveBuilder;

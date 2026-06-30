@@ -49,6 +49,15 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboards (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 )`);
+// Per-widget visibility exceptions. Default is visible; a row with
+// can_view=0 hides that widget from that user (used to hide graphs from
+// specific viewer accounts).
+db.exec(`CREATE TABLE IF NOT EXISTS widget_permissions (
+  widget_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  can_view INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (widget_id, user_id)
+)`);
 
 /* Tables that are app-internal, not user data sources */
 const INTERNAL = new Set(['app_dashboards', 'sqlite_sequence']);
@@ -251,6 +260,36 @@ function clearSessionCookie(res) {
 const publicUser = u => ({ id: u.id, email: u.email, name: u.name, role: u.role, created_at: u.created_at });
 
 /* =====================================================================
+   Permissions
+   ===================================================================== */
+function deniedWidgetIds(userId) {
+  return new Set(
+    db.prepare('SELECT widget_id FROM widget_permissions WHERE user_id=? AND can_view=0').all(userId).map(r => r.widget_id)
+  );
+}
+// Strip widgets a viewer isn't allowed to see from a dashboard state object.
+function filterStateForUser(stateObj, user) {
+  if (!stateObj || user.role !== 'viewer') return stateObj;     // only viewers are restricted
+  const denied = deniedWidgetIds(user.id);
+  if (!denied.size) return stateObj;
+  (stateObj.views || []).forEach(v => {
+    if (Array.isArray(v.widgets)) v.widgets = v.widgets.filter(w => !denied.has(w.id));
+  });
+  return stateObj;
+}
+// Every widget across every dashboard (for the admin visibility panel).
+function collectAllWidgets() {
+  const out = [];
+  for (const d of db.prepare('SELECT id,title,state_json FROM dashboards').all()) {
+    const st = safeParse(d.state_json);
+    (st.views || []).forEach(v => (v.widgets || []).forEach(w => {
+      if (w && w.id) out.push({ widget_id: w.id, title: w.title || w.type || w.id, dashboard_id: d.id, dashboard_title: d.title });
+    }));
+  }
+  return out;
+}
+
+/* =====================================================================
    Server
    ===================================================================== */
 const server = http.createServer(async (req, res) => {
@@ -343,37 +382,82 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     }
 
-    /* ---------------- Dashboards (per-user, persisted) ---------------- */
+    /* ---------------- Admin (admin-only) ---------------- */
+    if (p.startsWith('/api/admin/')) {
+      if (authUser.role !== 'admin') return sendJson(res, 403, { error: 'Admin only' });
+
+      if (p === '/api/admin/users' && m === 'GET')
+        return sendJson(res, 200, { users: db.prepare('SELECT id,email,name,role,created_at FROM users ORDER BY created_at').all() });
+
+      if (p.match(/^\/api\/admin\/users\/\d+\/role$/) && m === 'PUT') {
+        const uid = Number(p.split('/')[4]);
+        const { role } = await readBody(req);
+        if (!ROLES.includes(role)) return sendJson(res, 400, { error: 'Invalid role' });
+        const target = db.prepare('SELECT * FROM users WHERE id=?').get(uid);
+        if (!target) return sendJson(res, 404, { error: 'User not found' });
+        // never leave the system with zero admins
+        if (target.role === 'admin' && role !== 'admin') {
+          const admins = db.prepare("SELECT COUNT(*) n FROM users WHERE role='admin'").get().n;
+          if (admins <= 1) return sendJson(res, 400, { error: 'Cannot demote the last admin' });
+        }
+        db.prepare('UPDATE users SET role=? WHERE id=?').run(role, uid);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (p === '/api/admin/widgets' && m === 'GET')
+        return sendJson(res, 200, { widgets: collectAllWidgets() });
+
+      if (p === '/api/admin/permissions' && m === 'GET') {
+        const uid = Number(url.searchParams.get('user_id'));
+        const rows = db.prepare('SELECT widget_id,can_view FROM widget_permissions WHERE user_id=?').all(uid);
+        return sendJson(res, 200, { permissions: rows });
+      }
+
+      if (p === '/api/admin/permissions' && m === 'POST') {
+        const { user_id, widget_id, can_view } = await readBody(req);
+        if (!user_id || !widget_id) return sendJson(res, 400, { error: 'user_id and widget_id required' });
+        db.prepare(`INSERT INTO widget_permissions (widget_id,user_id,can_view) VALUES (?,?,?)
+                    ON CONFLICT(widget_id,user_id) DO UPDATE SET can_view=excluded.can_view`)
+          .run(widget_id, Number(user_id), can_view ? 1 : 0);
+        return sendJson(res, 200, { ok: true });
+      }
+
+      return sendJson(res, 404, { error: 'Unknown admin endpoint' });
+    }
+
+    /* ---------------- Dashboards (shared workspace, role-gated) ---------------- */
+    const canEdit = authUser.role === 'admin' || authUser.role === 'editor';
     if (p === '/api/dashboards' && m === 'GET') {
-      const rows = db.prepare(
-        'SELECT id,title,created_at,updated_at FROM dashboards WHERE owner_id=? ORDER BY updated_at DESC'
-      ).all(authUser.id);
+      // Shared workspace: everyone sees the dashboard list (viewers get their
+      // widgets filtered on open). Owner id is included for edit/delete rights.
+      const rows = db.prepare('SELECT id,title,owner_id,created_at,updated_at FROM dashboards ORDER BY updated_at DESC').all();
       return sendJson(res, 200, { dashboards: rows });
     }
 
     if (p === '/api/dashboards' && m === 'POST') {
+      if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot create dashboards' });
       const d = await readBody(req);
       const id = 'dash_' + crypto.randomBytes(6).toString('hex');
       const now = Date.now();
       db.prepare('INSERT INTO dashboards (id,owner_id,title,state_json,created_at,updated_at) VALUES (?,?,?,?,?,?)')
         .run(id, authUser.id, String(d.title || 'Untitled dashboard'), JSON.stringify(d.state || {}), now, now);
-      return sendJson(res, 200, { id, title: d.title || 'Untitled dashboard', created_at: now, updated_at: now });
+      return sendJson(res, 200, { id, title: d.title || 'Untitled dashboard', owner_id: authUser.id, created_at: now, updated_at: now });
     }
 
     if (p.startsWith('/api/dashboards/')) {
       const id = decodeURIComponent(p.slice('/api/dashboards/'.length));
       const row = db.prepare('SELECT * FROM dashboards WHERE id=?').get(id);
       if (!row) return sendJson(res, 404, { error: 'Dashboard not found' });
-      const owns = row.owner_id === authUser.id || authUser.role === 'admin';
+      const isOwner = row.owner_id === authUser.id;
+      const mayEdit = canEdit || isOwner;     // admin, editor, or the owner
 
       if (m === 'GET') {
-        if (!owns) return sendJson(res, 403, { error: 'Forbidden' });
-        return sendJson(res, 200, { id: row.id, title: row.title, state: safeParse(row.state_json), owner_id: row.owner_id, updated_at: row.updated_at });
+        // anyone signed in may view; viewers get denied widgets stripped out
+        const stateObj = filterStateForUser(safeParse(row.state_json), authUser);
+        return sendJson(res, 200, { id: row.id, title: row.title, state: stateObj, owner_id: row.owner_id, updated_at: row.updated_at });
       }
       if (m === 'PUT') {
-        // editors/admins/owners may save; viewers may not (Phase B enforces UI too)
-        if (!owns) return sendJson(res, 403, { error: 'Forbidden' });
-        if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot edit dashboards' });
+        if (authUser.role === 'viewer' || !mayEdit) return sendJson(res, 403, { error: 'You do not have permission to edit this dashboard' });
         const d = await readBody(req);
         const title = d.title !== undefined ? String(d.title) : row.title;
         const stateJson = d.state !== undefined ? JSON.stringify(d.state) : row.state_json;
@@ -382,7 +466,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, id, updated_at: now });
       }
       if (m === 'DELETE') {
-        if (!owns) return sendJson(res, 403, { error: 'Forbidden' });
+        if (!(authUser.role === 'admin' || isOwner)) return sendJson(res, 403, { error: 'Only the owner or an admin can delete this dashboard' });
         db.prepare('DELETE FROM dashboards WHERE id=?').run(id);
         return sendJson(res, 200, { ok: true });
       }
