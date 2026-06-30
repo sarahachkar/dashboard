@@ -118,6 +118,14 @@ button { font-family: inherit; cursor: pointer; }
 .btn-icon { display: none; }
 @media (max-width: 768px) { .btn-icon { display: inline; } }
 
+/* ===== Logged-in user chip ===== */
+.user-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14); }
+.user-avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); text-transform: uppercase; }
+.user-meta { display: flex; flex-direction: column; line-height: 1.15; }
+.user-name { font-size: 12.5px; font-weight: 600; color: #fff; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-role { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-2); font-weight: 600; }
+@media (max-width: 768px) { .user-meta { display: none; } .user-chip { padding: 3px; } }
+
 /* ===== Tabs (dashboard views) ===== */
 .view-tabs { display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; background: var(--panel); border-bottom: 1px solid rgba(124,92,252,0.25); position: fixed; top: var(--toolbarH, 56px); left: 0; right: 0; z-index: 45; }
 .layout.sb-collapsed .view-tabs, body:not(.has-sidebar) .view-tabs { left: 0; }
@@ -298,15 +306,16 @@ select.input { cursor: pointer; }
 .widget.minimized .w-config { gap: 6px; }
 .widget.minimized .w-config .mini { min-width: 70px; }
 .widget.minimized .w-config select { height: 28px; font-size: 11px; }
-/* Maximized — full-screen overlay */
+/* Maximized — full-screen overlay (must sit above the fixed toolbar/view-tabs) */
 .widget.maximized {
-  position: fixed; inset: 28px; z-index: 150; margin: 0; grid-column: auto !important;
+  position: fixed; inset: 28px; z-index: 301; margin: 0; grid-column: auto !important;
   box-shadow: 0 24px 70px rgba(16,24,40,0.28); animation: maxIn .2s cubic-bezier(0.16,1,0.3,1);
 }
+.widget.maximized:hover { transform: none; }   /* no hover-jiggle while maximized */
 @keyframes maxIn { from { opacity: .4; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
 .widget.maximized .w-body { max-height: none; }
 .widget.maximized .w-body canvas { max-height: none !important; }
-.maximize-backdrop { position: fixed; inset: 0; background: rgba(16,24,40,.35); z-index: 149; opacity: 0; transition: opacity .2s ease; }
+.maximize-backdrop { position: fixed; inset: 0; background: rgba(10,13,26,.78); z-index: 300; opacity: 0; transition: opacity .2s ease; }
 .maximize-backdrop.show { opacity: 1; }
 
 /* ===== Header (Issue 3) ===== */
@@ -665,6 +674,14 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
   <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">🛢</span><span class="btn-label">Connect DB</span></button>
   <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
+  <div class="user-chip" id="userChip" title="Signed in">
+    <span class="user-avatar" id="userAvatar">?</span>
+    <span class="user-meta">
+      <span class="user-name" id="userName">…</span>
+      <span class="user-role" id="userRole"></span>
+    </span>
+  </div>
+  <button class="btn ghost sm" id="logoutBtn" title="Log out"><span class="btn-icon">⎋</span><span class="btn-label">Logout</span></button>
 
 </div>
 
@@ -774,8 +791,11 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 
         <!-- Manual pane -->
         <div class="bds-pane" id="bdPane-manual">
-          <div class="manual-wrap" style="max-height:160px"><table class="manual" id="bdManualTable"></table></div>
-          <div class="manual-actions" style="margin-top:8px">
+          <div class="bhint" style="margin:0 0 8px">Type your data below. Click a header to rename a column. Use the buttons to add rows or columns, then <b>Load</b>.</div>
+          <div class="manual-wrap" style="max-height:200px"><table class="manual" id="bdManualTable"></table></div>
+          <div class="manual-actions" style="margin-top:8px;gap:8px">
+            <button class="btn sm" id="bdAddRow" type="button">+ Row</button>
+            <button class="btn sm" id="bdAddCol" type="button">+ Column</button>
             <button class="bds-run" id="bdMLoad" style="width:auto;padding:6px 16px;flex:none;margin-left:auto">Load</button>
           </div>
           <div class="bds-status" id="bdMStatus"></div>
@@ -854,11 +874,15 @@ const API_BASE = (location.protocol === 'file:') ? 'http://localhost:4000' : '';
 let BACKEND = false;          // becomes true once /api/health responds
 const API = {
   async _fetch(path, opts) {
-    const r = await fetch(API_BASE + path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts));
+    const r = await fetch(API_BASE + path, Object.assign({ headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' }, opts));
+    // Session expired or missing → back to login
+    if (r.status === 401 && !path.startsWith('/api/auth/')) { location.href = '/login'; throw new Error('Not authenticated'); }
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
     return body;
   },
+  me() { return this._fetch('/api/auth/me'); },
+  logout() { return this._fetch('/api/auth/logout', { method: 'POST' }); },
   health() { return this._fetch('/api/health'); },
   query(sql) { return this._fetch('/api/query', { method: 'POST', body: JSON.stringify({ sql }) }); },
   tables() { return this._fetch('/api/tables'); },
@@ -882,9 +906,10 @@ const CHART_TYPES = [
   ['stacked','Stacked Bar'],['area','Area Chart'],['pie','Pie Chart'],
   ['donut','Donut Chart'],['scatter','Scatter Plot'],['bubble','Bubble Chart'],
   ['heatmap','Heatmap'],['treemap','Treemap'],['gauge','Gauge'],
+  ['radar','Radar Chart'],['polarArea','Polar Area'],
   ['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', bar:'📊', hbar:'📶', stacked:'🧱', area:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', bar:'📊', hbar:'📶', stacked:'🧱', area:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -1335,7 +1360,8 @@ function toggleMinimize(w, el, btn) {
   if (el.classList.contains('maximized')) restoreMaximize();
   w.minimized = !el.classList.contains('minimized');
   el.classList.toggle('minimized', w.minimized);
-  btn.textContent = w.minimized ? 'Expand' : 'Minimize';
+  // keep the icon (words overflow the 28px icon button); update only the tooltip
+  btn.textContent = w.minimized ? '▲' : '▼';
   btn.title = w.minimized ? 'Expand' : 'Minimize';
   // chart-holder height changes in both directions — re-fit the chart either way
   if (charts[w.id]) setTimeout(()=>{ try{charts[w.id].resize()}catch(e){} }, 60);
@@ -1348,7 +1374,7 @@ function toggleMaximize(w, el, btn) {
   if (!bd) { bd = document.createElement('div'); bd.className = 'maximize-backdrop'; bd.onclick = restoreMaximize; document.body.appendChild(bd); }
   requestAnimationFrame(()=>bd.classList.add('show'));
   el.classList.add('maximized');
-  btn.textContent = 'Restore'; btn.title = 'Restore';
+  btn.textContent = '🗕'; btn.title = 'Restore';
   setTimeout(()=>{ if (charts[w.id]) { try{charts[w.id].resize()}catch(e){} } }, 200);
 }
 function restoreMaximize() {
@@ -1357,7 +1383,7 @@ function restoreMaximize() {
   if (el) {
     el.classList.remove('maximized');
     const b = el.querySelector('[data-act="maximize"]');
-    if (b) { b.textContent = 'Maximize'; b.title = 'Maximize'; }
+    if (b) { b.textContent = '⛶'; b.title = 'Maximize'; }
     const id = el.dataset.id;
     setTimeout(()=>{ if (charts[id]) { try{charts[id].resize()}catch(e){} } }, 60);
   }
@@ -1494,6 +1520,25 @@ function buildChartConfig(w, rows) {
       type:'doughnut',
       data:{ labels: agg.map(a=>a[0]), datasets:[{ data:agg.map(a=>round(a[1])), backgroundColor:colors, borderColor:getComputedStyle(document.body).getPropertyValue('--panel'), borderWidth:2 }] },
       options: baseOpts({ cutout: t==='donut'?'62%':'0%', plugins:{legend:{position:'right',labels:{color:textColor()}}} })
+    };
+  }
+
+  if (t==='radar') {
+    const agg = aggregate(rows, w.x, w.y, w.agg);
+    agg.sort((a,b)=> String(a[0])>String(b[0])?1:-1);
+    return {
+      type:'radar',
+      data:{ labels: agg.map(a=>a[0]), datasets:[{ label:w.y, data:agg.map(a=>round(a[1])), backgroundColor:hexA(colors[0],0.25), borderColor:colors[0], pointBackgroundColor:colors[0], borderWidth:2 }] },
+      options: baseOpts({ plugins: legendC(), scales:{ r:{ angleLines:{color:gridColor()}, grid:{color:gridColor()}, pointLabels:{color:textColor()}, ticks:{color:textColor(),backdropColor:'transparent'} } } })
+    };
+  }
+
+  if (t==='polarArea') {
+    const agg = aggregate(rows, w.x, w.y, w.agg);
+    return {
+      type:'polarArea',
+      data:{ labels: agg.map(a=>a[0]), datasets:[{ data:agg.map(a=>round(a[1])), backgroundColor:agg.map((_,i)=>hexA(colors[i%colors.length],0.7)), borderColor:agg.map((_,i)=>colors[i%colors.length]), borderWidth:1 }] },
+      options: baseOpts({ plugins:{legend:{position:'right',labels:{color:textColor()}}}, scales:{ r:{ grid:{color:gridColor()}, ticks:{color:textColor(),backdropColor:'transparent'} } } })
     };
   }
 
@@ -1873,8 +1918,8 @@ function renderBdManualTable() {
   const m = bdManualModel, t = $('#bdManualTable');
   if (!t) return;
   t.innerHTML =
-    `<thead><tr>${m.columns.map((c,ci) => `<th><input data-col="${ci}" value="${escapeHtml(String(c))}"><button class="col-del" data-delcol="${ci}">✕</button></th>`).join('')}<th></th></tr></thead>` +
-    `<tbody>${m.rows.map((row, ri) => `<tr>${m.columns.map((_, ci) => `<td><input data-r="${ri}" data-c="${ci}" value="${escapeHtml(String(row[ci] ?? ''))}"></td>`).join('')}<td><button class="row-del" data-delrow="${ri}">✕</button></td></tr>`).join('')}</tbody>`;
+    `<thead><tr>${m.columns.map((c,ci) => `<th><input data-col="${ci}" value="${escapeHtml(String(c))}" placeholder="column ${ci+1}"><button class="col-del" data-delcol="${ci}">✕</button></th>`).join('')}<th></th></tr></thead>` +
+    `<tbody>${m.rows.map((row, ri) => `<tr>${m.columns.map((_, ci) => `<td><input data-r="${ri}" data-c="${ci}" value="${escapeHtml(String(row[ci] ?? ''))}" placeholder="value"></td>`).join('')}<td><button class="row-del" data-delrow="${ri}">✕</button></td></tr>`).join('')}</tbody>`;
   t.querySelectorAll('input[data-col]').forEach(inp => inp.onchange = () => m.columns[+inp.dataset.col] = inp.value);
   t.querySelectorAll('input[data-r]').forEach(inp => inp.onchange = () => m.rows[+inp.dataset.r][+inp.dataset.c] = inp.value);
   t.querySelectorAll('[data-delcol]').forEach(b => b.onclick = () => { m.columns.splice(+b.dataset.delcol, 1); m.rows.forEach(r => r.splice(+b.dataset.delcol, 1)); renderBdManualTable(); });
@@ -2307,12 +2352,32 @@ function renderAll(){ renderViewTabs(); renderGrid(); syncStickyOffsets(); }
 /* =====================================================================
    Wire up events
    ===================================================================== */
+async function loadCurrentUser() {
+  try {
+    const { user } = await API.me();
+    const name = user.name || user.email;
+    $('#userName').textContent = name;
+    $('#userRole').textContent = user.role;
+    $('#userAvatar').textContent = (name || '?').trim().charAt(0) || '?';
+    $('#userChip').title = `${name} · ${user.role}`;
+  } catch (e) {
+    location.href = '/login';   // not authenticated
+  }
+}
+
 function init() {
   initState();
   Chart.defaults.color = textColor();
   Chart.defaults.font.family = 'Inter';
 
   $('#dashTitle').value = state.title || 'Nexus Analytics';
+
+  // ── Auth: load the signed-in user into the toolbar chip (bounce to /login if not) ──
+  loadCurrentUser();
+  $('#logoutBtn').onclick = async () => {
+    try { await API.logout(); } catch(e) {}
+    location.href = '/login';
+  };
 
   // The data-source sidebar was removed; all data loading now happens inside
   // the graph builder. We still prime the shared table list the builder reads.
@@ -2374,6 +2439,17 @@ function init() {
   $('#bdBrRun').onclick = bdBrowseLoad;
   $('#bdQueryRun').onclick = bdQueryRun;
   $('#bdMLoad').onclick = bdManualLoad;
+  $('#bdAddRow').onclick = () => {
+    if (!bdManualModel) renderBdManualTable();
+    bdManualModel.rows.push(bdManualModel.columns.map(() => ''));
+    renderBdManualTable();
+  };
+  $('#bdAddCol').onclick = () => {
+    if (!bdManualModel) renderBdManualTable();
+    bdManualModel.columns.push('col' + (bdManualModel.columns.length + 1));
+    bdManualModel.rows.forEach(r => r.push(''));
+    renderBdManualTable();
+  };
   $('#dashTitle').onchange = saveState;
   $('#themeBtn').onclick = ()=>{
     const cur=document.documentElement.getAttribute('data-theme');

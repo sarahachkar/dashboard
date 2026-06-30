@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — Nexus Analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0d1a; --panel:#111528; --panel-2:#181c30; --border:#252a40;
+  --text:#eef0f8; --text-dim:#8890b0; --accent:#7c5cfc; --accent-2:#00e5b0; --danger:#ff5e7a;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;height:100%;}
+body{
+  background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif;
+  display:grid; place-items:center; padding:24px;
+  background-image:radial-gradient(ellipse at 20% 20%,rgba(124,92,252,.12) 0%,transparent 55%),
+                   radial-gradient(ellipse at 80% 80%,rgba(0,229,176,.08) 0%,transparent 55%);
+}
+.auth-card{
+  width:100%; max-width:400px; background:var(--panel); border:1px solid var(--border);
+  border-radius:18px; padding:34px 30px; box-shadow:0 24px 70px rgba(0,0,0,.45);
+}
+.brand{display:flex; align-items:center; gap:11px; margin-bottom:22px;}
+.brand .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent-2));
+  display:grid;place-items:center;font-weight:800;color:#fff;box-shadow:0 0 16px rgba(124,92,252,.55);}
+.brand .name{font-size:18px;font-weight:800;
+  background:linear-gradient(90deg,#c4b0ff,#80ffdb);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+h1{font-size:22px;font-weight:700;margin:0 0 4px;}
+.sub{color:var(--text-dim);font-size:13.5px;margin:0 0 22px;}
+label{display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin:0 0 6px;}
+.field{margin-bottom:15px;}
+input{
+  width:100%; background:var(--panel-2); color:var(--text); border:1.5px solid var(--border);
+  border-radius:10px; padding:12px 13px; font-size:16px; font-family:inherit; outline:none; transition:border-color .15s, box-shadow .15s;
+}
+input:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(124,92,252,.2);}
+.btn{
+  width:100%; margin-top:6px; padding:13px; border:none; border-radius:11px; cursor:pointer;
+  font-size:15px; font-weight:700; color:#fff; font-family:inherit;
+  background:linear-gradient(135deg,var(--accent),#5b3fd0); box-shadow:0 6px 22px rgba(124,92,252,.45); transition:filter .15s, transform .1s;
+}
+.btn:hover{filter:brightness(1.1);} .btn:active{transform:scale(.99);}
+.btn[disabled]{opacity:.6;cursor:default;}
+.msg{margin-top:14px;font-size:13px;min-height:18px;text-align:center;}
+.msg.err{color:var(--danger);} .msg.ok{color:var(--accent-2);}
+.alt{margin-top:20px;text-align:center;font-size:13.5px;color:var(--text-dim);}
+.alt a{color:var(--accent);text-decoration:none;font-weight:600;}
+.alt a:hover{text-decoration:underline;}
+</style>
+</head>
+<body>
+<form class="auth-card" id="form" autocomplete="on">
+  <div class="brand"><div class="logo">N</div><div class="name">Nexus Analytics</div></div>
+  <h1>Welcome back</h1>
+  <p class="sub">Sign in to your dashboard.</p>
+
+  <div class="field">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" placeholder="you@company.com" required autofocus>
+  </div>
+  <div class="field">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" placeholder="••••••••" required>
+  </div>
+  <button class="btn" id="submit" type="submit">Sign in</button>
+  <div class="msg" id="msg"></div>
+
+  <div class="alt">Don't have an account? <a href="/signup">Create one</a></div>
+</form>
+
+<script>
+const form = document.getElementById('form');
+const msg = document.getElementById('msg');
+const btn = document.getElementById('submit');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  msg.className = 'msg'; msg.textContent = '';
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.value.trim(), password: password.value })
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || 'Login failed');
+    msg.className = 'msg ok'; msg.textContent = 'Success — redirecting…';
+    location.href = '/';
+  } catch (err) {
+    msg.className = 'msg err'; msg.textContent = err.message;
+    btn.disabled = false; btn.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>

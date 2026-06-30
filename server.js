@@ -1,20 +1,24 @@
-/* =====================================================================
-   Nexus Analytics — backend
-   Zero-dependency core: Node's built-in HTTP server + node:sqlite.
-   Optional Postgres support (via the `pg` package) for "Connect DB".
 
-   Run:  node --experimental-sqlite server.js     (Node >= 22.5)
-   ===================================================================== */
 'use strict';
 
 const http = require('node:http');
 const fs   = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+
+// bcrypt for password hashing. We use `bcryptjs` (pure-JS bcrypt — same
+// algorithm, no native build to compile on the server). If it isn't
+// installed we transparently fall back to Node's built-in scrypt so auth
+// still works zero-dependency. Hashes are self-describing so verify knows which.
+let bcrypt = null;
+try { bcrypt = require('bcryptjs'); } catch { /* fall back to scrypt */ }
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const DB_FILE = path.join(ROOT, 'nexus.db');
+const ROLES = ['admin', 'editor', 'viewer'];
+const SESSION_TTL = 1000 * 60 * 60 * 24 * 7;   // 7 days
 
 /* =====================================================================
    SQLite (default data source + app storage)
@@ -22,6 +26,20 @@ const DB_FILE = path.join(ROOT, 'nexus.db');
 const db = new DatabaseSync(DB_FILE);
 db.exec(`CREATE TABLE IF NOT EXISTS app_dashboards (
   id TEXT PRIMARY KEY, name TEXT, state TEXT, updated INTEGER
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  name TEXT,
+  role TEXT NOT NULL DEFAULT 'viewer' CHECK(role IN ('admin','editor','viewer')),
+  created_at INTEGER NOT NULL
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
 )`);
 
 /* Tables that are app-internal, not user data sources */
@@ -171,6 +189,60 @@ function readBody(req) {
 function safeParse(s) { try { return JSON.parse(s); } catch { return {}; } }
 
 /* =====================================================================
+   Auth — password hashing, sessions, cookies
+   ===================================================================== */
+function hashPassword(pw) {
+  if (bcrypt) return bcrypt.hashSync(pw, 10);
+  const salt = crypto.randomBytes(16).toString('hex');
+  const dk = crypto.scryptSync(pw, salt, 64).toString('hex');
+  return `scrypt$${salt}$${dk}`;
+}
+function verifyPassword(pw, hash) {
+  if (!hash) return false;
+  if (hash.startsWith('scrypt$')) {
+    const [, salt, dk] = hash.split('$');
+    const calc = crypto.scryptSync(pw, salt, 64).toString('hex');
+    return calc.length === dk.length &&
+      crypto.timingSafeEqual(Buffer.from(dk, 'hex'), Buffer.from(calc, 'hex'));
+  }
+  return bcrypt ? bcrypt.compareSync(pw, hash) : false;
+}
+function parseCookies(req) {
+  const out = {};
+  (req.headers.cookie || '').split(';').forEach(part => {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  });
+  return out;
+}
+function createSession(userId) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = Date.now();
+  db.prepare('INSERT INTO sessions (token,user_id,created_at,expires_at) VALUES (?,?,?,?)')
+    .run(token, userId, now, now + SESSION_TTL);
+  return token;
+}
+function getSessionUser(req) {
+  const token = parseCookies(req).sid;
+  if (!token) return null;
+  const s = db.prepare('SELECT * FROM sessions WHERE token=?').get(token);
+  if (!s) return null;
+  if (s.expires_at < Date.now()) { db.prepare('DELETE FROM sessions WHERE token=?').run(token); return null; }
+  return db.prepare('SELECT id,email,name,role,created_at FROM users WHERE id=?').get(s.user_id) || null;
+}
+function destroySession(req) {
+  const token = parseCookies(req).sid;
+  if (token) db.prepare('DELETE FROM sessions WHERE token=?').run(token);
+}
+function setSessionCookie(res, token) {
+  res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL / 1000)}`);
+}
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', 'sid=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
+}
+const publicUser = u => ({ id: u.id, email: u.email, name: u.name, role: u.role, created_at: u.created_at });
+
+/* =====================================================================
    Server
    ===================================================================== */
 const server = http.createServer(async (req, res) => {
@@ -189,6 +261,58 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    /* ---------------- Auth API (public) ---------------- */
+    if (p === '/api/auth/signup' && m === 'POST') {
+      const { email, password, name, role } = await readBody(req);
+      const mail = String(email || '').trim().toLowerCase();
+      if (!mail || !password) return sendJson(res, 400, { error: 'Email and password are required' });
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return sendJson(res, 400, { error: 'Enter a valid email' });
+      if (String(password).length < 6) return sendJson(res, 400, { error: 'Password must be at least 6 characters' });
+      if (db.prepare('SELECT id FROM users WHERE email=?').get(mail))
+        return sendJson(res, 409, { error: 'An account with that email already exists' });
+
+      const userCount = db.prepare('SELECT COUNT(*) n FROM users').get().n;
+      const requester = getSessionUser(req);
+      // First-ever user bootstraps as admin. Otherwise an admin may assign a
+      // role when creating a user; everyone else defaults to viewer.
+      let finalRole = 'viewer';
+      if (userCount === 0) finalRole = 'admin';
+      else if (role && requester && requester.role === 'admin' && ROLES.includes(role)) finalRole = role;
+
+      const info = db.prepare('INSERT INTO users (email,password_hash,name,role,created_at) VALUES (?,?,?,?,?)')
+        .run(mail, hashPassword(String(password)), String(name || '').trim(), finalRole, Date.now());
+      const user = db.prepare('SELECT id,email,name,role,created_at FROM users WHERE id=?').get(Number(info.lastInsertRowid));
+      // Log in the new user only when this is a self-signup (not an admin creating others).
+      if (!requester) setSessionCookie(res, createSession(user.id));
+      return sendJson(res, 200, { user });
+    }
+
+    if (p === '/api/auth/login' && m === 'POST') {
+      const { email, password } = await readBody(req);
+      const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(email || '').trim().toLowerCase());
+      if (!u || !verifyPassword(String(password || ''), u.password_hash))
+        return sendJson(res, 401, { error: 'Invalid email or password' });
+      setSessionCookie(res, createSession(u.id));
+      return sendJson(res, 200, { user: publicUser(u) });
+    }
+
+    if (p === '/api/auth/logout' && m === 'POST') {
+      destroySession(req);
+      clearSessionCookie(res);
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (p === '/api/auth/me' && m === 'GET') {
+      const u = getSessionUser(req);
+      if (!u) return sendJson(res, 401, { error: 'Not authenticated' });
+      return sendJson(res, 200, { user: u });
+    }
+
+    /* ---------------- Session gate: every other /api/* needs a login ------- */
+    const authUser = getSessionUser(req);
+    if (p.startsWith('/api/') && !authUser)
+      return sendJson(res, 401, { error: 'Not authenticated' });
+
     /* ---------------- API ---------------- */
     if (p === '/api/health' && m === 'GET')
       return sendJson(res, 200, { ok: true, engine: activeSource, time: Date.now() });
@@ -262,8 +386,19 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 404, { error: 'Unknown endpoint' });
 
     /* ---------------- Static files ---------------- */
-    let filePath = p === '/' ? '/dashboard.html' : decodeURIComponent(p);
-    filePath = path.normalize(path.join(ROOT, filePath));
+    // Pretty routes for the auth pages
+    let rel = p;
+    if (p === '/' )       rel = '/dashboard.html';
+    else if (p === '/login')  rel = '/login.html';
+    else if (p === '/signup') rel = '/signup.html';
+
+    // The dashboard requires a logged-in session; bounce guests to /login.
+    if (rel === '/dashboard.html' && !authUser) {
+      res.writeHead(302, { Location: '/login' });
+      return res.end();
+    }
+
+    let filePath = path.normalize(path.join(ROOT, decodeURIComponent(rel)));
     if (!filePath.startsWith(ROOT)) { res.writeHead(403); return res.end('Forbidden'); }
     fs.readFile(filePath, (err, buf) => {
       if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not found'); }
@@ -279,5 +414,6 @@ seed();
 server.listen(PORT, () => {
   console.log(`Nexus Analytics running on http://localhost:${PORT}`);
   console.log(`  Data source: sqlite (${DB_FILE})`);
-  console.log(`  API: /api/health  /api/tables  /api/query  /api/datasets  /api/dashboards  /api/connect`);
+  console.log(`  Auth: ${bcrypt ? 'bcryptjs' : 'scrypt (bcryptjs not installed)'} · sessions in sqlite`);
+  console.log(`  API: /api/auth/(signup|login|logout|me)  /api/tables  /api/query  /api/dashboards  /api/connect`);
 });

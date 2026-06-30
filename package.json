@@ -12,6 +12,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "pg": "^8.22.0"
   }
 }
