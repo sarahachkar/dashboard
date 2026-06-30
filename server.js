@@ -27,7 +27,9 @@ const db = new DatabaseSync(DB_FILE);
 db.exec(`CREATE TABLE IF NOT EXISTS app_dashboards (
   id TEXT PRIMARY KEY, name TEXT, state TEXT, updated INTEGER
 )`);
-db.exec(`CREATE TABLE IF NOT EXISTS users (
+// Named app_users (not "users") to avoid colliding with a sample data
+// table that may already be named "users" in an existing database.
+db.exec(`CREATE TABLE IF NOT EXISTS app_users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
@@ -71,7 +73,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS connections (
 )`);
 
 /* Tables that are app-internal, not user data sources */
-const INTERNAL = new Set(['app_dashboards', 'sqlite_sequence']);
+const INTERNAL = new Set(['app_dashboards', 'sqlite_sequence', 'app_users', 'sessions',
+  'dashboards', 'widget_permissions', 'app_meta', 'connections']);
 
 /* ---- helpers ---- */
 function sanitize(name) {
@@ -256,7 +259,7 @@ function getSessionUser(req) {
   const s = db.prepare('SELECT * FROM sessions WHERE token=?').get(token);
   if (!s) return null;
   if (s.expires_at < Date.now()) { db.prepare('DELETE FROM sessions WHERE token=?').run(token); return null; }
-  return db.prepare('SELECT id,email,name,role,created_at FROM users WHERE id=?').get(s.user_id) || null;
+  return db.prepare('SELECT id,email,name,role,created_at FROM app_users WHERE id=?').get(s.user_id) || null;
 }
 function destroySession(req) {
   const token = parseCookies(req).sid;
@@ -369,10 +372,10 @@ const server = http.createServer(async (req, res) => {
       if (!mail || !password) return sendJson(res, 400, { error: 'Email and password are required' });
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return sendJson(res, 400, { error: 'Enter a valid email' });
       if (String(password).length < 6) return sendJson(res, 400, { error: 'Password must be at least 6 characters' });
-      if (db.prepare('SELECT id FROM users WHERE email=?').get(mail))
+      if (db.prepare('SELECT id FROM app_users WHERE email=?').get(mail))
         return sendJson(res, 409, { error: 'An account with that email already exists' });
 
-      const userCount = db.prepare('SELECT COUNT(*) n FROM users').get().n;
+      const userCount = db.prepare('SELECT COUNT(*) n FROM app_users').get().n;
       const requester = getSessionUser(req);
       // First-ever user bootstraps as admin. Otherwise an admin may assign a
       // role when creating a user; everyone else defaults to viewer.
@@ -380,9 +383,9 @@ const server = http.createServer(async (req, res) => {
       if (userCount === 0) finalRole = 'admin';
       else if (role && requester && requester.role === 'admin' && ROLES.includes(role)) finalRole = role;
 
-      const info = db.prepare('INSERT INTO users (email,password_hash,name,role,created_at) VALUES (?,?,?,?,?)')
+      const info = db.prepare('INSERT INTO app_users (email,password_hash,name,role,created_at) VALUES (?,?,?,?,?)')
         .run(mail, hashPassword(String(password)), String(name || '').trim(), finalRole, Date.now());
-      const user = db.prepare('SELECT id,email,name,role,created_at FROM users WHERE id=?').get(Number(info.lastInsertRowid));
+      const user = db.prepare('SELECT id,email,name,role,created_at FROM app_users WHERE id=?').get(Number(info.lastInsertRowid));
       // Log in the new user only when this is a self-signup (not an admin creating others).
       if (!requester) setSessionCookie(res, createSession(user.id));
       return sendJson(res, 200, { user });
@@ -390,7 +393,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/auth/login' && m === 'POST') {
       const { email, password } = await readBody(req);
-      const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(email || '').trim().toLowerCase());
+      const u = db.prepare('SELECT * FROM app_users WHERE email=?').get(String(email || '').trim().toLowerCase());
       if (!u || !verifyPassword(String(password || ''), u.password_hash))
         return sendJson(res, 401, { error: 'Invalid email or password' });
       setSessionCookie(res, createSession(u.id));
@@ -441,20 +444,20 @@ const server = http.createServer(async (req, res) => {
       if (authUser.role !== 'admin') return sendJson(res, 403, { error: 'Admin only' });
 
       if (p === '/api/admin/users' && m === 'GET')
-        return sendJson(res, 200, { users: db.prepare('SELECT id,email,name,role,created_at FROM users ORDER BY created_at').all() });
+        return sendJson(res, 200, { users: db.prepare('SELECT id,email,name,role,created_at FROM app_users ORDER BY created_at').all() });
 
       if (p.match(/^\/api\/admin\/users\/\d+\/role$/) && m === 'PUT') {
         const uid = Number(p.split('/')[4]);
         const { role } = await readBody(req);
         if (!ROLES.includes(role)) return sendJson(res, 400, { error: 'Invalid role' });
-        const target = db.prepare('SELECT * FROM users WHERE id=?').get(uid);
+        const target = db.prepare('SELECT * FROM app_users WHERE id=?').get(uid);
         if (!target) return sendJson(res, 404, { error: 'User not found' });
         // never leave the system with zero admins
         if (target.role === 'admin' && role !== 'admin') {
-          const admins = db.prepare("SELECT COUNT(*) n FROM users WHERE role='admin'").get().n;
+          const admins = db.prepare("SELECT COUNT(*) n FROM app_users WHERE role='admin'").get().n;
           if (admins <= 1) return sendJson(res, 400, { error: 'Cannot demote the last admin' });
         }
-        db.prepare('UPDATE users SET role=? WHERE id=?').run(role, uid);
+        db.prepare('UPDATE app_users SET role=? WHERE id=?').run(role, uid);
         return sendJson(res, 200, { ok: true });
       }
 
