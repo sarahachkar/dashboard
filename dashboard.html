@@ -102,11 +102,24 @@ button { font-family: inherit; cursor: pointer; }
 .btn.teal:hover { filter: brightness(1.08); color: #06231d; }
 .btn.ghost { background: transparent; }
 .btn.sm { padding: 5px 9px; font-size: 12px; }
+/* Toolbar buttons (Refresh / Theme / Connect DB): clearly visible by default,
+   brighter accent highlight on hover. */
+.toolbar .btn.ghost {
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.30);
+  color: #fff;
+}
+.toolbar .btn.ghost:hover {
+  background: rgba(124,92,252,0.30);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(124,92,252,0.4);
+}
 .btn-icon { display: none; }
 @media (max-width: 768px) { .btn-icon { display: inline; } }
 
 /* ===== Tabs (dashboard views) ===== */
-.view-tabs { display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; background: var(--panel); border-bottom: 1px solid rgba(124,92,252,0.25); position: fixed; top: var(--toolbarH, 56px); left: 420px; right: 0; z-index: 45; }
+.view-tabs { display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; background: var(--panel); border-bottom: 1px solid rgba(124,92,252,0.25); position: fixed; top: var(--toolbarH, 56px); left: 0; right: 0; z-index: 45; }
 .layout.sb-collapsed .view-tabs, body:not(.has-sidebar) .view-tabs { left: 0; }
 @media (max-width: 1024px) { .view-tabs { left: 340px; } }
 @media (max-width: 768px) { .view-tabs { left: 0; } }
@@ -130,7 +143,7 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--panel); border-right: 1px solid var(--border); padding: 16px;
   overflow-y: auto;
 }
-.main { margin-left: 420px; }
+.main { margin-left: 0; }
 .layout.sb-collapsed .main { margin-left: 0; }
 .sidebar.collapsed { width: 0; padding: 0; overflow: hidden; border: none; }
 /* Pinned sidebar header — stays visible while the controls below scroll */
@@ -502,9 +515,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 
 /* Tablet: 600–1024px */
 @media (max-width: 1024px) {
-  .sidebar { width: 340px; }
-  .main { margin-left: 340px; }
-  .layout.sb-collapsed .main { margin-left: 0; }
+  .main { margin-left: 0; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 }
 
@@ -650,9 +661,9 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <span class="badge" id="rowBadge">0 rows</span>
   <span class="badge" id="backendBadge" title="Backend connection status">local</span>
   <div class="spacer"></div>
-  <button class="btn ghost sm" id="toggleSidebar" title="Toggle data panel"><span class="btn-icon">☰</span><span class="btn-label">Data</span></button>
   <button class="btn ghost sm" id="refreshBtn" title="Refresh all charts"><span class="btn-icon">↺</span><span class="btn-label">Refresh</span></button>
   <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
+  <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">🛢</span><span class="btn-label">Connect DB</span></button>
   <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
 
 </div>
@@ -661,122 +672,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 <div class="view-tabs" id="viewTabs"></div>
 
 <div class="layout">
-  <!-- ===== Sidebar / Data Source ===== -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-head">
-      <div class="section-title">Data source</div>
-      <div class="ds-tabs">
-        <button class="ds-tab active" data-pane="browse">Browse</button>
-        <button class="ds-tab" data-pane="query">Query Mode</button>
-        <button class="ds-tab" data-pane="manual">Manual Mode</button>
-        <button class="ds-tab" data-pane="connect">Connect DB</button>
-      </div>
-    </div>
-    <div class="card" id="dsCard">
-
-      <!-- Browse pane (no-code visual selector) -->
-      <div class="ds-pane active" id="pane-browse">
-        <div class="hint" style="margin-top:0">Pick a table and choose what to pull — no query writing needed.</div>
-        <div class="browse-field">
-          <label>Table</label>
-          <select class="input" id="brTable" style="width:100%"></select>
-        </div>
-        <div class="browse-field">
-          <label>Columns</label>
-          <div class="br-cols" id="brCols"></div>
-        </div>
-        <div class="browse-field">
-          <label>Filter <span style="color:var(--text-dim);font-weight:400">(optional)</span></label>
-          <div class="br-filter">
-            <select class="input" id="brFilterCol"><option value="">— no filter —</option></select>
-            <select class="input" id="brFilterOp">
-              <option value="=">=</option><option value="!=">≠</option>
-              <option value=">">&gt;</option><option value="<">&lt;</option>
-              <option value=">=">≥</option><option value="<=">≤</option>
-            </select>
-            <input class="input" id="brFilterVal" placeholder="value">
-          </div>
-        </div>
-        <div class="browse-field br-2col">
-          <div>
-            <label>Sort by</label>
-            <select class="input" id="brSort" style="width:100%"><option value="">— none —</option></select>
-          </div>
-          <div>
-            <label>Direction</label>
-            <select class="input" id="brDir" style="width:100%"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
-          </div>
-        </div>
-        <div class="browse-field">
-          <label>Row limit</label>
-          <input class="input" id="brLimit" type="number" min="1" placeholder="all" style="width:100%">
-        </div>
-        <div class="browse-field">
-          <label>Generated query</label>
-          <div class="br-sql-wrap">
-            <code class="br-sql" id="brSql">SELECT * FROM sales</code>
-            <button class="br-copy" id="brCopy" title="Copy query">Copy</button>
-          </div>
-        </div>
-        <button class="btn primary" id="brLoadBtn">Load Selected Data</button>
-      </div>
-
-      <!-- Query pane -->
-      <div class="ds-pane" id="pane-query">
-        <textarea class="query" id="queryInput" spellcheck="false">SELECT date, category, revenue, units_sold, region, profit_margin
-FROM sales
-ORDER BY date</textarea>
-        <div class="hint">
-          Simulated engine. Try: <b>SELECT ... FROM sales</b>, <b>FROM users</b>, <b>FROM traffic</b>,
-          or paste <b>CSV</b> / <b>JSON array</b> directly. <code>WHERE region = 'North'</code> &amp; <code>LIMIT n</code> supported.
-        </div>
-        <button class="btn primary" id="runQueryBtn" style="width:100%">Run Query</button>
-      </div>
-
-      <!-- Manual pane -->
-      <div class="ds-pane" id="pane-manual">
-        <div class="manual-wrap">
-          <table class="manual" id="manualTable"></table>
-        </div>
-        <div class="manual-actions">
-          <button class="btn primary sm" id="loadManualBtn" style="margin-left:auto">Load Data</button>
-        </div>
-      </div>
-
-      <!-- Connect DB pane -->
-      <div class="ds-pane" id="pane-connect">
-        <div class="hint" style="margin-top:0;margin-bottom:16px">Enter your database credentials to connect.</div>
-        <div style="display:grid;grid-template-columns:1fr 100px;gap:10px;margin-bottom:10px">
-          <div>
-            <label class="conn-label">IP / Host</label>
-            <input class="input" id="connHost" placeholder="192.168.1.100" style="width:100%">
-          </div>
-          <div>
-            <label class="conn-label">Port</label>
-            <input class="input" id="connPort" placeholder="5432" style="width:100%">
-          </div>
-        </div>
-        <div style="margin-bottom:10px">
-          <label class="conn-label">Database name</label>
-          <input class="input" id="connDb" placeholder="mydb" style="width:100%">
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
-          <div>
-            <label class="conn-label">Username</label>
-            <input class="input" id="connUser" placeholder="postgres" style="width:100%">
-          </div>
-          <div>
-            <label class="conn-label">Password</label>
-            <input class="input" id="connPass" type="password" placeholder="••••••••" style="width:100%">
-          </div>
-        </div>
-        <button class="btn primary" id="connectDbBtn" style="width:100%;padding:11px;font-size:14px">Connect</button>
-        <div id="connStatus" style="margin-top:12px;font-size:12px;display:none;padding:10px 12px;border-radius:8px"></div>
-
-      </div>
-    </div>
-
-  </aside>
+<!-- (data-source sidebar removed — data lives in the graph builder; Connect DB moved to the header) -->
 
   <!-- ===== Main canvas ===== -->
   <main class="main">
@@ -902,8 +798,42 @@ ORDER BY date</textarea>
   </div>
 </div>
 
-<!-- ===== New database table modal ===== -->
-
+<!-- ===== Connect DB modal ===== -->
+<div class="modal-overlay" id="connectOverlay">
+  <div class="builder" role="dialog" aria-modal="true" style="width:min(460px,96vw)">
+    <div class="builder-head">
+      <h2>Connect to a database</h2>
+      <button class="icon-btn" id="connectClose" title="Close">Close</button>
+    </div>
+    <div class="hint" style="margin-top:0;margin-bottom:16px">Enter your PostgreSQL credentials to connect.</div>
+    <div style="display:grid;grid-template-columns:1fr 100px;gap:10px;margin-bottom:10px">
+      <div>
+        <label class="conn-label">IP / Host</label>
+        <input class="input" id="connHost" placeholder="192.168.1.100" style="width:100%">
+      </div>
+      <div>
+        <label class="conn-label">Port</label>
+        <input class="input" id="connPort" placeholder="5432" style="width:100%">
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label class="conn-label">Database name</label>
+      <input class="input" id="connDb" placeholder="mydb" style="width:100%">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">
+      <div>
+        <label class="conn-label">Username</label>
+        <input class="input" id="connUser" placeholder="postgres" style="width:100%">
+      </div>
+      <div>
+        <label class="conn-label">Password</label>
+        <input class="input" id="connPass" type="password" placeholder="••••••••" style="width:100%">
+      </div>
+    </div>
+    <button class="btn primary" id="connectDbBtn" style="width:100%;padding:11px;font-size:14px">Connect</button>
+    <div id="connStatus" style="margin-top:12px;font-size:12px;display:none;padding:10px 12px;border-radius:8px"></div>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -2184,20 +2114,13 @@ async function createDbTable() {
     const res = await API.saveDataset(name, cols, rows);
     closeTableModal();
     await refreshBrowseTables();
-    // jump to Browse and select the new table
-    $$('.ds-tab').forEach(t=>t.classList.remove('active'));
-    $$('.ds-pane').forEach(p=>p.classList.remove('active'));
-    document.querySelector('.ds-tab[data-pane="browse"]').classList.add('active');
-    $('#pane-browse').classList.add('active');
-    if (browseTables[res.name]) { $('#brTable').value = res.name; renderBrowseColumns(); }
     toast(`Table “${res.name}” created — ${res.rowCount} row${res.rowCount===1?'':'s'}`);
   } catch(e) { toast('Create failed: '+e.message, true); }
 }
 window.openTableModal = openTableModal;
 function openDataPanel() {
-  $('#sidebar').classList.remove('collapsed');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  toast('Add data from the Data source panel on the left');
+  // Data loading now lives in the graph builder.
+  openBuilder();
 }
 window.openDataPanel = openDataPanel;
 function removeWidget(id) {
@@ -2302,6 +2225,9 @@ function localTables() {
 let browseTables = {};   // name -> columns[]
 
 async function refreshBrowseTables() {
+  // Populates the shared `browseTables` map (name -> columns) that the graph
+  // builder's data source reads. The old sidebar UI is gone; if the builder
+  // is open, refresh its table picker too.
   browseTables = {};
   if (BACKEND) {
     try { const r = await API.tables(); r.tables.forEach(t => browseTables[t.name] = t.columns); }
@@ -2309,11 +2235,9 @@ async function refreshBrowseTables() {
   } else {
     browseTables = localTables();
   }
-  const sel = $('#brTable');
-  const prev = sel.value;
-  sel.innerHTML = Object.keys(browseTables).map(t=>`<option>${escapeHtml(t)}</option>`).join('');
-  if (browseTables[prev]) sel.value = prev;
-  renderBrowseColumns();
+  if (typeof refreshBdBrowseTables === 'function' && $('#builderOverlay')?.classList.contains('open')) {
+    refreshBdBrowseTables();
+  }
 }
 
 function renderBrowseColumns() {
@@ -2390,66 +2314,18 @@ function init() {
 
   $('#dashTitle').value = state.title || 'Nexus Analytics';
 
-  // data source tabs
-  $$('.ds-tab').forEach(tab=>tab.onclick=()=>{
-    $$('.ds-tab').forEach(t=>t.classList.remove('active'));
-    $$('.ds-pane').forEach(p=>p.classList.remove('active'));
-    tab.classList.add('active');
-    $('#pane-'+tab.dataset.pane).classList.add('active');
-    if (tab.dataset.pane==='manual') renderManualTable();
-    if (tab.dataset.pane==='browse') refreshBrowseTables();
-
-  });
-
-  // Browse (no-code) controls
-  $('#brTable').onchange = renderBrowseColumns;
-  ['#brFilterCol','#brFilterOp','#brFilterVal','#brSort','#brDir','#brLimit'].forEach(s=>{
-    const el = $(s); el.oninput = updateBrowseSql; el.onchange = updateBrowseSql;
-  });
-  $('#brLoadBtn').onclick = async ()=>{
-    const sql = buildBrowseSql();
-    try {
-      dataset = await executeSql(sql);
-      afterDataLoad(`Loaded ${dataset.rows.length} rows from ${$('#brTable').value}`);
-    } catch(e){ toast('Load failed: '+e.message, true); }
-  };
-  $('#brCopy').onclick = ()=>{
-    const sql = $('#brSql').textContent;
-    navigator.clipboard?.writeText(sql).then(()=>{ const b=$('#brCopy'); b.textContent='Copied'; setTimeout(()=>b.textContent='Copy',1200); toast('Query copied'); });
-  };
+  // The data-source sidebar was removed; all data loading now happens inside
+  // the graph builder. We still prime the shared table list the builder reads.
   refreshBrowseTables();
 
-  // query — backend SQL when connected, local simulation otherwise
-  $('#runQueryBtn').onclick = async ()=>{
-    const text = $('#queryInput').value.trim();
-    const isSql = /select|from/i.test(text) && !(text[0]==='[' || text[0]==='{');
-    const isCsv = /,/.test(text) && /\n/.test(text) && !/select/i.test(text);
-    if (BACKEND && isSql && !isCsv) {
-      try {
-        const res = await API.query(text);
-        dataset = normalizeRows(res.rows);
-        afterDataLoad(`Server query — ${dataset.rows.length} rows (${$('#backendBadge').textContent.replace('','')})`);
-        return;
-      } catch(e){
-        toast('Server query failed, trying local: '+e.message, true);
-      }
-    }
-    try { dataset = runQuery(text); afterDataLoad('Query executed — '+dataset.rows.length+' rows'); }
-    catch(e){ toast('Query error: '+e.message, true); }
-  };
-  // CSV paste auto-detect
-  $('#queryInput').addEventListener('paste', e=>{
-    const txt=(e.clipboardData||window.clipboardData).getData('text');
-    if (/,/.test(txt) && /\n/.test(txt) && !/select/i.test(txt)) {
-      toast('CSV detected — press Run Query to load');
-    }
-  });
+  // ── Connect DB modal (opened from the header button) ──
+  const connectOverlay = $('#connectOverlay');
+  const openConnect  = () => connectOverlay.classList.add('open');
+  const closeConnect = () => connectOverlay.classList.remove('open');
+  $('#openConnectBtn').onclick = openConnect;
+  $('#connectClose').onclick = closeConnect;
+  connectOverlay.addEventListener('click', e => { if (e.target.id === 'connectOverlay') closeConnect(); });
 
-  // manual
-  $('#addRowBtn') && ($('#addRowBtn').onclick = ()=>{ manualModel.rows.push(manualModel.columns.map(()=>'')); renderManualTable(); });
-  $('#loadManualBtn').onclick = loadManual;
-
-  // ── Connect DB pane ──
   $('#connectDbBtn').onclick = async () => {
     const host = $('#connHost').value.trim() || 'localhost';
     const port = $('#connPort').value.trim() || '5432';
@@ -2473,6 +2349,7 @@ function init() {
       st.textContent = 'Connected!';
       toast('Database connected');
       refreshBrowseTables();
+      setTimeout(closeConnect, 900);   // let the user see "Connected!" then close
     } catch(e) {
       st.style.background = 'color-mix(in srgb, var(--danger) 12%, transparent)';
       st.style.color = 'var(--danger)';
@@ -2506,33 +2383,10 @@ function init() {
     Chart.defaults.color=textColor();
     state.theme=next; renderGrid(); saveState();
   };
-  $('#toggleSidebar').onclick = ()=>{
-    const sb = $('#sidebar');
-    const isMobile = window.innerWidth <= 768;
-    if (isMobile) {
-      sb.classList.toggle('mobile-open');
-    } else {
-      sb.classList.toggle('collapsed');
-      document.querySelector('.layout').classList.toggle('sb-collapsed', sb.classList.contains('collapsed'));
-    }
-  };
 
-  // Close mobile sidebar when clicking outside
-  document.addEventListener('click', (e) => {
-    const sb = $('#sidebar');
-    if (window.innerWidth <= 768 && sb.classList.contains('mobile-open')) {
-      if (!sb.contains(e.target) && e.target.id !== 'toggleSidebar') {
-        sb.classList.remove('mobile-open');
-      }
-    }
-  });
-
-  // Reset on resize + keep the fixed-header offsets exact after rotation
+  // Keep the fixed-header offsets exact after resize/rotation
   let _resizeT;
-  const onResize = () => {
-    if (window.innerWidth > 768) $('#sidebar').classList.remove('mobile-open');
-    syncStickyOffsets();
-  };
+  const onResize = () => { syncStickyOffsets(); };
   window.addEventListener('resize', () => { clearTimeout(_resizeT); _resizeT = setTimeout(onResize, 120); });
   window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
 
