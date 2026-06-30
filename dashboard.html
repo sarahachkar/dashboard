@@ -118,6 +118,15 @@ button { font-family: inherit; cursor: pointer; }
 .btn-icon { display: none; }
 @media (max-width: 768px) { .btn-icon { display: inline; } }
 
+/* ===== Dashboard picker + save indicator ===== */
+.dash-picker { background: rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.20); border-radius:8px; padding:6px 8px; font-size:12.5px; font-family:inherit; max-width:170px; outline:none; cursor:pointer; }
+.dash-picker:focus { border-color: var(--accent); }
+.save-indicator { font-size:11px; font-weight:600; padding:5px 10px; border-radius:999px; white-space:nowrap; }
+.save-indicator.saved { color:var(--accent-2); background:rgba(0,229,176,0.12); }
+.save-indicator.unsaved { color:var(--warn); background:rgba(255,179,64,0.16); }
+.save-indicator.saving { color:var(--text-dim); background:rgba(255,255,255,0.08); }
+@media (max-width: 768px) { .dash-picker { max-width:120px; } .save-indicator { display:none; } #newDashBtn .btn-label { display:none; } }
+
 /* ===== Logged-in user chip ===== */
 .user-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14); }
 .user-avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); text-transform: uppercase; }
@@ -667,6 +676,10 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 <div class="toolbar">
 
   <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false">
+  <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
+  <button class="btn ghost sm" id="newDashBtn" title="New dashboard"><span class="btn-icon">＋</span><span class="btn-label">Dashboard</span></button>
+  <button class="btn ghost sm" id="delDashBtn" title="Delete this dashboard">🗑</button>
+  <span class="save-indicator saved" id="saveIndicator">✓ Saved</span>
   <span class="badge" id="rowBadge">0 rows</span>
   <span class="badge" id="backendBadge" title="Backend connection status">local</span>
   <div class="spacer"></div>
@@ -888,7 +901,10 @@ const API = {
   tables() { return this._fetch('/api/tables'); },
   saveDataset(name, columns, rows) { return this._fetch('/api/datasets', { method: 'POST', body: JSON.stringify({ name, columns, rows }) }); },
   listDashboards() { return this._fetch('/api/dashboards'); },
-  saveDashboard(d) { return this._fetch('/api/dashboards', { method: 'POST', body: JSON.stringify(d) }); },
+  getDashboard(id) { return this._fetch('/api/dashboards/' + id); },
+  createDashboard(title, state) { return this._fetch('/api/dashboards', { method: 'POST', body: JSON.stringify({ title, state }) }); },
+  updateDashboard(id, title, state) { return this._fetch('/api/dashboards/' + id, { method: 'PUT', body: JSON.stringify({ title, state }) }); },
+  deleteDashboard(id) { return this._fetch('/api/dashboards/' + id, { method: 'DELETE' }); },
   connectDb(cs) { return this._fetch('/api/connect', { method: 'POST', body: JSON.stringify({ connectionString: cs }) }); },
   clearTable(table) { return this._fetch('/api/clear', { method: 'POST', body: JSON.stringify({ table }) }); },
   disconnect() { return this._fetch('/api/disconnect', { method: 'POST' }); }
@@ -1202,22 +1218,92 @@ function initState() {
   }
   if (!state.views) state.views = [{ name:'Overview', widgets: defaultWidgets() }];
 }
-let backendSaveTimer;
+/* ---- Dashboard persistence (DB-backed, per user) ---- */
+let dashboardsList = [];      // [{id,title,updated_at}]
+let saveTimer;
+
+function serializeState() {
+  return { views: state.views.map(v => ({ name: v.name, widgets: v.widgets })), activeView, theme: state.theme };
+}
+function applyState(s) {
+  s = s || {};
+  state.views = (s.views && s.views.length) ? s.views : [{ name: 'Overview', widgets: defaultWidgets() }];
+  activeView = Math.min(s.activeView || 0, state.views.length - 1);
+  if (s.theme) { state.theme = s.theme; document.documentElement.setAttribute('data-theme', s.theme); }
+}
+function setSaveIndicator(status) {   // 'saved' | 'unsaved' | 'saving'
+  const el = $('#saveIndicator'); if (!el) return;
+  el.className = 'save-indicator ' + status;
+  el.textContent = status === 'saved' ? '✓ Saved' : status === 'saving' ? 'Saving…' : '● Unsaved';
+}
+
 function saveState() {
   state.title = $('#dashTitle').value;
   state.activeView = activeView;
-  // state.dataset = dataset; // intentionally not persisted
-  // localStorage cache disabled
-  // Mirror layout to the backend (debounced) when connected.
-  if (BACKEND) {
-    clearTimeout(backendSaveTimer);
-    backendSaveTimer = setTimeout(()=>{
-      if (!state.id) state.id = 'dash_'+Math.random().toString(36).slice(2,10);
-      const views = state.views.map(v => ({ name:v.name, widgets:v.widgets }));
-      API.saveDashboard({ id: state.id, name: state.title, state: { views, activeView, theme: state.theme } })
-        .catch(e => console.warn('backend save failed', e.message));
-    }, 800);
-  }
+  if (!state.id) return;                 // dashboard not created yet
+  setSaveIndicator('unsaved');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    setSaveIndicator('saving');
+    try {
+      await API.updateDashboard(state.id, state.title, serializeState());
+      const item = dashboardsList.find(d => d.id === state.id);
+      if (item && item.title !== state.title) { item.title = state.title; renderDashboardPicker(); }
+      setSaveIndicator('saved');
+    } catch (e) { setSaveIndicator('unsaved'); console.warn('save failed', e.message); }
+  }, 700);
+}
+
+async function loadDashboards() {
+  try {
+    const { dashboards } = await API.listDashboards();
+    dashboardsList = dashboards || [];
+    if (!dashboardsList.length) {
+      const created = await API.createDashboard(state.title || 'My Dashboard', serializeState());
+      dashboardsList = [created];
+      state.id = created.id;
+      renderDashboardPicker();
+      setSaveIndicator('saved');
+    } else {
+      await openDashboard(dashboardsList[0].id);
+    }
+  } catch (e) { console.warn('loadDashboards failed', e.message); }
+}
+
+async function openDashboard(id) {
+  const d = await API.getDashboard(id);
+  state.id = d.id;
+  state.title = d.title;
+  applyState(d.state);
+  $('#dashTitle').value = state.title;
+  renderDashboardPicker();
+  renderAll();
+  setSaveIndicator('saved');
+}
+
+async function createDashboard() {
+  const created = await API.createDashboard('New dashboard', { views: [{ name: 'Overview', widgets: [] }], activeView: 0, theme: state.theme });
+  dashboardsList.unshift(created);
+  await openDashboard(created.id);
+  toast('Dashboard created');
+}
+
+async function deleteDashboard() {
+  if (dashboardsList.length <= 1) return toast('Keep at least one dashboard', true);
+  if (!confirm(`Delete dashboard "${state.title}"? This cannot be undone.`)) return;
+  const id = state.id;
+  try {
+    await API.deleteDashboard(id);
+    dashboardsList = dashboardsList.filter(d => d.id !== id);
+    await openDashboard(dashboardsList[0].id);
+    toast('Dashboard deleted');
+  } catch (e) { toast('Delete failed: ' + e.message, true); }
+}
+
+function renderDashboardPicker() {
+  const sel = $('#dashPicker'); if (!sel) return;
+  sel.innerHTML = dashboardsList.map(d =>
+    `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}</option>`).join('');
 }
 
 /* =====================================================================
@@ -2451,6 +2537,10 @@ function init() {
     renderBdManualTable();
   };
   $('#dashTitle').onchange = saveState;
+  // Dashboard picker / new / delete
+  $('#dashPicker').onchange = (e) => { if (e.target.value !== state.id) openDashboard(e.target.value); };
+  $('#newDashBtn').onclick = createDashboard;
+  $('#delDashBtn').onclick = deleteDashboard;
   $('#themeBtn').onclick = ()=>{
     const cur=document.documentElement.getAttribute('data-theme');
     const next=cur==='dark'?'light':'dark';
@@ -2478,6 +2568,8 @@ function init() {
 
   refreshDateSelectors();
   renderAll();
+  // Load this user's saved dashboards from the DB (replaces the initial render)
+  loadDashboards();
 
   syncStickyOffsets();
   window.addEventListener('resize', ()=>{ syncStickyOffsets(); Object.values(charts).forEach(c=>{try{c.resize()}catch(e){}}); });

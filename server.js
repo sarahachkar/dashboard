@@ -41,6 +41,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL
 )`);
+db.exec(`CREATE TABLE IF NOT EXISTS dashboards (
+  id TEXT PRIMARY KEY,
+  owner_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  state_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)`);
 
 /* Tables that are app-internal, not user data sources */
 const INTERNAL = new Set(['app_dashboards', 'sqlite_sequence']);
@@ -254,7 +262,7 @@ const server = http.createServer(async (req, res) => {
   if (m === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type'
     });
     return res.end();
@@ -335,18 +343,49 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     }
 
+    /* ---------------- Dashboards (per-user, persisted) ---------------- */
     if (p === '/api/dashboards' && m === 'GET') {
-      const rows = db.prepare('SELECT id,name,state,updated FROM app_dashboards ORDER BY updated DESC').all();
-      return sendJson(res, 200, { dashboards: rows.map(r => ({ ...r, state: safeParse(r.state) })) });
+      const rows = db.prepare(
+        'SELECT id,title,created_at,updated_at FROM dashboards WHERE owner_id=? ORDER BY updated_at DESC'
+      ).all(authUser.id);
+      return sendJson(res, 200, { dashboards: rows });
     }
 
     if (p === '/api/dashboards' && m === 'POST') {
       const d = await readBody(req);
-      const id = d.id || 'dash_' + Math.random().toString(36).slice(2, 10);
-      db.prepare(`INSERT INTO app_dashboards (id,name,state,updated) VALUES (?,?,?,?)
-                  ON CONFLICT(id) DO UPDATE SET name=excluded.name, state=excluded.state, updated=excluded.updated`)
-        .run(id, d.name || 'Untitled', JSON.stringify(d.state || {}), Date.now());
-      return sendJson(res, 200, { ok: true, id });
+      const id = 'dash_' + crypto.randomBytes(6).toString('hex');
+      const now = Date.now();
+      db.prepare('INSERT INTO dashboards (id,owner_id,title,state_json,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+        .run(id, authUser.id, String(d.title || 'Untitled dashboard'), JSON.stringify(d.state || {}), now, now);
+      return sendJson(res, 200, { id, title: d.title || 'Untitled dashboard', created_at: now, updated_at: now });
+    }
+
+    if (p.startsWith('/api/dashboards/')) {
+      const id = decodeURIComponent(p.slice('/api/dashboards/'.length));
+      const row = db.prepare('SELECT * FROM dashboards WHERE id=?').get(id);
+      if (!row) return sendJson(res, 404, { error: 'Dashboard not found' });
+      const owns = row.owner_id === authUser.id || authUser.role === 'admin';
+
+      if (m === 'GET') {
+        if (!owns) return sendJson(res, 403, { error: 'Forbidden' });
+        return sendJson(res, 200, { id: row.id, title: row.title, state: safeParse(row.state_json), owner_id: row.owner_id, updated_at: row.updated_at });
+      }
+      if (m === 'PUT') {
+        // editors/admins/owners may save; viewers may not (Phase B enforces UI too)
+        if (!owns) return sendJson(res, 403, { error: 'Forbidden' });
+        if (authUser.role === 'viewer') return sendJson(res, 403, { error: 'Viewers cannot edit dashboards' });
+        const d = await readBody(req);
+        const title = d.title !== undefined ? String(d.title) : row.title;
+        const stateJson = d.state !== undefined ? JSON.stringify(d.state) : row.state_json;
+        const now = Date.now();
+        db.prepare('UPDATE dashboards SET title=?, state_json=?, updated_at=? WHERE id=?').run(title, stateJson, now, id);
+        return sendJson(res, 200, { ok: true, id, updated_at: now });
+      }
+      if (m === 'DELETE') {
+        if (!owns) return sendJson(res, 403, { error: 'Forbidden' });
+        db.prepare('DELETE FROM dashboards WHERE id=?').run(id);
+        return sendJson(res, 200, { ok: true });
+      }
     }
 
     if (p === '/api/clear' && m === 'POST') {
