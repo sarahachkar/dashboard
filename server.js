@@ -446,11 +446,12 @@ const server = http.createServer(async (req, res) => {
       if (db.prepare('SELECT id FROM app_users WHERE email=?').get(mail))
         return sendJson(res, 409, { error: 'An account with that email already exists' });
 
-      // First-ever account is the admin (no permission). Everyone else is a
-      // regular user defaulting to viewer — an admin promotes them to editor.
+      // First-ever account is the admin. Every other account is a regular
+      // user who is the full owner ("admin") of their own single dashboard —
+      // cross-user graph access is controlled per-graph by the admin.
       const isFirst = db.prepare('SELECT COUNT(*) n FROM app_users').get().n === 0;
       const account_type = isFirst ? 'admin' : 'user';
-      const permission = isFirst ? null : 'viewer';
+      const permission = isFirst ? null : 'editor';
       const now = Date.now();
       const info = db.prepare('INSERT INTO app_users (email,password_hash,name,account_type,permission,last_active,created_at) VALUES (?,?,?,?,?,?,?)')
         .run(mail, hashPassword(String(password)), String(name || '').trim(), account_type, permission, now, now);
@@ -673,14 +674,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/dashboards' && m === 'POST') {
-      if (!requireEditorOrAdmin(authUser, res)) return;   // viewers cannot create dashboards
+      if (!requireEditorOrAdmin(authUser, res)) return;
+      // One dashboard per user: if they already own one, return it instead of creating another.
+      const existing = db.prepare('SELECT * FROM dashboards WHERE owner_id=? ORDER BY created_at LIMIT 1').get(authUser.id);
+      if (existing) return sendJson(res, 200, { id: existing.id, title: existing.title, owner_id: existing.owner_id, visibility: existing.visibility, created_at: existing.created_at, updated_at: existing.updated_at });
       const d = await readBody(req);
       const id = 'dash_' + crypto.randomBytes(6).toString('hex');
       const now = Date.now();
       const vis = d.visibility === 'shared' ? 'shared' : 'private';
       db.prepare('INSERT INTO dashboards (id,owner_id,title,state_json,visibility,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
-        .run(id, authUser.id, String(d.title || 'Untitled dashboard'), JSON.stringify(d.state || {}), vis, now, now);
-      return sendJson(res, 200, { id, title: d.title || 'Untitled dashboard', owner_id: authUser.id, visibility: vis, created_at: now, updated_at: now });
+        .run(id, authUser.id, String(d.title || 'My Dashboard'), JSON.stringify(d.state || {}), vis, now, now);
+      return sendJson(res, 200, { id, title: d.title || 'My Dashboard', owner_id: authUser.id, visibility: vis, created_at: now, updated_at: now });
     }
 
     if (p.startsWith('/api/dashboards/')) {

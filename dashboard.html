@@ -817,9 +817,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <div class="tb-group tb-left">
     <div class="tb-logo">N</div>
     <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" readonly title="Dashboard name (read-only)">
-    <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
-    <button class="btn ghost sm icon-only" id="newDashBtn" title="New dashboard">＋</button>
-    <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard">🗑</button>
+    <select class="dash-picker" id="dashPicker" title="Switch dashboard" style="display:none"></select>
     <span class="save-indicator saved" id="saveIndicator" title="Save status">✓ Saved</span>
   </div>
 
@@ -1093,15 +1091,8 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       </div>
       <button class="icon-btn" id="userPermClose" title="Close">Close</button>
     </div>
-    <div class="up-role-row" style="margin:6px 0 4px">
-      <label class="bfield-label" for="upRole">Account type</label>
-      <select class="binput" id="upRole" style="max-width:160px">
-        <option value="viewer">Viewer</option>
-        <option value="editor">Editor</option>
-      </select>
-    </div>
-    <div class="bfield-label" style="margin:18px 0 8px">Graphs</div>
-    <div class="bhint" style="margin-bottom:12px">Use each graph's ⋮ menu to set access — <b>View</b> (read-only), <b>Edit</b>, or <b>Hide</b> (removed from their dashboard, not deleted).</div>
+    <div class="bfield-label" style="margin:14px 0 8px">Graph access</div>
+    <div class="bhint" style="margin-bottom:12px">Use each graph's ⋮ menu to set access — <b>View</b> (read-only), <b>Edit</b>, or <b>Hide</b> (removed from their dashboard, not deleted). Graphs left hidden are never shared with this user.</div>
     <div id="upCards" class="up-cards"></div>
     <div class="builder-actions" style="margin-top:18px">
       <button class="btn primary" id="userPermSave">Done</button>
@@ -1593,6 +1584,8 @@ function renderDashboardPicker() {
     const tag = d.mine === false ? (d.visibility === 'shared' ? ' (shared)' : ' (view-only)') : '';
     return `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}${tag}</option>`;
   }).join('');
+  // One dashboard per user — only show the switcher if others were shared with them.
+  sel.style.display = dashboardsList.length > 1 ? '' : 'none';
 }
 
 /* =====================================================================
@@ -2792,9 +2785,9 @@ function applyAccountUI() {
   document.body.dataset.permission = (currentUser && currentUser.permission) || '';
   if (!admin) $('#adminBtn')?.remove();
   if (!canEdit) {
-    // Viewers: no creation / editing / data-source controls at all.
-    ['#newGraphBtn','#openConnectBtn','#shareBtn','#newDashBtn','#delDashBtn','#saveIndicator'].forEach(sel => $(sel)?.remove());
-    const t = $('#dashTitle'); if (t) t.readOnly = true;
+    // (No pure-viewer accounts in the one-dashboard-per-user model, but keep
+    // this guard: strip creation/data-source controls if a user can't edit.)
+    ['#newGraphBtn','#openConnectBtn','#shareBtn','#saveIndicator'].forEach(sel => $(sel)?.remove());
   }
 }
 
@@ -2942,32 +2935,17 @@ async function renderAdminUsers() {
   const wrap = $('#adminUsers');
   if (!users.length) { wrap.innerHTML = '<div class="bhint">No user accounts yet.</div>'; return; }
   wrap.innerHTML = users.map(u => `
-    <div class="admin-row" data-uid="${u.id}">
+    <div class="admin-row clickable" data-open="${u.id}">
       <div class="au-info">
-        <div class="au-name" data-open="${u.id}" style="cursor:pointer">${escapeHtml(u.name || '(no name)')}</div>
+        <div class="au-name">${escapeHtml(u.name || '(no name)')}</div>
         <div class="au-email">${escapeHtml(u.email)}</div>
       </div>
       <span class="au-lastactive" title="Last active">${lastActiveLabel(u.last_active)}</span>
-      <select class="perm-select p-${u.permission}" data-perm-for="${u.id}">
-        <option value="viewer" ${u.permission === 'viewer' ? 'selected' : ''}>Viewer</option>
-        <option value="editor" ${u.permission === 'editor' ? 'selected' : ''}>Editor</option>
-      </select>
+      <span class="au-chevron">›</span>
     </div>`).join('');
-  // click name → detail modal
+  // click a user → per-graph permission modal
   wrap.querySelectorAll('[data-open]').forEach(el =>
     el.onclick = () => openUserPerms(adminUsersCache.find(u => u.id === +el.dataset.open)));
-  // inline permission dropdown (with confirm on downgrade)
-  wrap.querySelectorAll('select[data-perm-for]').forEach(sel => {
-    let prev = sel.value;
-    sel.onchange = async () => {
-      const uid = +sel.dataset.permFor;
-      const u = adminUsersCache.find(x => x.id === uid);
-      if (prev === 'editor' && sel.value === 'viewer' &&
-          !confirm(`This will remove all edit access for ${u.name || u.email}. Continue?`)) { sel.value = prev; return; }
-      try { await API.adminSetPermission(uid, sel.value); if (u) u.permission = sel.value; prev = sel.value; sel.className = 'perm-select p-' + sel.value; toast('Permission updated'); }
-      catch (e) { toast('Failed: ' + e.message, true); sel.value = prev; }
-    };
-  });
 }
 
 /* --- per-user detail modal: account permission + dynamic per-graph rows --- */
@@ -2978,7 +2956,6 @@ async function openUserPerms(user) {
   $('#userPermOverlay').classList.add('open');
   $('#upTitle').textContent = user.name || user.email;
   $('#upEmail').textContent = user.email;
-  $('#upRole').value = user.permission;
   const wrap = $('#upCards');
   wrap.innerHTML = '<div class="bhint">Loading…</div>';
   try {
@@ -3038,18 +3015,9 @@ async function setGraphPerm(wid, action) {
   } catch (e) { toast('Save failed: ' + e.message, true); }
 }
 function closeUserPerms() { $('#userPermOverlay').classList.remove('open'); upUser = null; }
-async function saveUserPerms() {   // "Done" — persist account type + close
-  if (!upUser) return closeUserPerms();
-  const newPerm = $('#upRole').value;
-  try {
-    if (newPerm !== upUser.permission) {
-      if (upUser.permission === 'editor' && newPerm === 'viewer' &&
-          !confirm(`This will remove all edit access for ${upUser.name || upUser.email}. Continue?`)) return;
-      await API.adminSetPermission(upUser.id, newPerm); upUser.permission = newPerm;
-    }
-    closeUserPerms();
-    renderAdminUsers();
-  } catch (e) { toast('Save failed: ' + e.message, true); }
+function saveUserPerms() {   // "Done" — per-graph choices already saved on each click
+  closeUserPerms();
+  renderAdminUsers();
 }
 
 /* Public read-only view of a shared dashboard (/view/<token>) — no login. */
@@ -3185,10 +3153,8 @@ function init() {
     renderBdManualTable();
   };
   $('#dashTitle').onchange = saveState;
-  // Dashboard picker / new / delete
+  // Dashboard switcher (only visible if others were shared with the user)
   $('#dashPicker').onchange = (e) => { if (e.target.value !== state.id) openDashboard(e.target.value); };
-  $('#newDashBtn').onclick = createDashboard;
-  $('#delDashBtn').onclick = deleteDashboard;
   $('#themeBtn').onclick = ()=>{
     const cur=document.documentElement.getAttribute('data-theme');
     const next=cur==='dark'?'light':'dark';
