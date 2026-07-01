@@ -127,13 +127,43 @@ button { font-family: inherit; cursor: pointer; }
 .save-indicator.saving { color:var(--text-dim); background:rgba(255,255,255,0.08); }
 @media (max-width: 768px) { .dash-picker { max-width:120px; } .save-indicator { display:none; } #newDashBtn .btn-label { display:none; } }
 
-/* ===== Logged-in user chip ===== */
-.user-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14); }
-.user-avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); text-transform: uppercase; }
-.user-meta { display: flex; flex-direction: column; line-height: 1.15; }
-.user-name { font-size: 12.5px; font-weight: 600; color: #fff; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.user-role { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-2); font-weight: 600; }
-@media (max-width: 768px) { .user-meta { display: none; } .user-chip { padding: 3px; } }
+/* ===== Toolbar layout (grouped, overflow-aware) ===== */
+.toolbar { gap: 10px; }
+.tb-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tb-left { flex: 0 1 auto; min-width: 0; }        /* can shrink; title truncates */
+.tb-right { flex: 0 0 auto; position: relative; }  /* never shrinks — stays on screen */
+.tb-logo { width: 30px; height: 30px; border-radius: 9px; flex: none; display: grid; place-items: center; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--grad-a), var(--grad-b)); box-shadow: 0 0 12px rgba(124,92,252,.5); }
+.btn { white-space: nowrap; }                       /* never wrap button text */
+.btn.icon-only { padding: 7px 9px; }
+.btn.icon-only .btn-label { display: none; }
+.tb-secondary { display: flex; align-items: center; gap: 8px; }
+.tb-overflow-btn { display: none; font-size: 16px; }
+
+/* User menu (avatar → dropdown) */
+.user-menu { position: relative; flex: none; }
+.user-avatar-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-weight: 700; font-size: 14px; text-transform: uppercase; display: grid; place-items: center; cursor: pointer; }
+.user-dropdown { position: absolute; right: 0; top: calc(100% + 8px); min-width: 190px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 12px; display: none; z-index: 60; }
+.user-dropdown.open { display: block; }
+.user-dropdown .ud-head { padding: 2px 4px 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.user-dropdown .ud-name { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.user-dropdown .ud-role { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-2); font-weight: 600; margin-top: 2px; }
+.user-dropdown #logoutBtn { width: 100%; justify-content: center; }
+
+/* Collapse secondary controls (rows/engine/Refresh/Theme) into the ⋯ menu.
+   Primary actions (Share, Connect DB, Admin, New graph) + user menu stay visible. */
+@media (max-width: 1024px) {
+  .tb-overflow-btn { display: inline-flex; }
+  .tb-secondary {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+    flex-direction: column; align-items: stretch; gap: 6px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 10px; min-width: 180px; display: none;
+  }
+  .tb-secondary.open { display: flex; }
+  .tb-secondary .btn { justify-content: flex-start; }
+  .tb-secondary .btn .btn-label { display: inline; }   /* labels visible inside the menu */
+  .tb-secondary .badge { align-self: flex-start; }
+}
 
 /* ===== Connection manager ===== */
 .conn-list { display: flex; flex-direction: column; gap: 8px; }
@@ -180,14 +210,16 @@ body[data-readonly="true"] .add-card-fab,
 body[data-readonly="true"] #viewTabs > button.btn,
 body[data-readonly="true"] .view-tab .x,
 body[data-readonly="true"] .empty-canvas .btn { display: none !important; }
-/* Public share-link view: also hide the whole left chrome (picker, connect, etc.) */
+/* Public share-link view: also hide the whole app chrome (picker, connect, etc.) */
 body[data-viewmode="link"] #dashPicker,
 body[data-viewmode="link"] #newDashBtn,
+body[data-viewmode="link"] #delDashBtn,
 body[data-viewmode="link"] #openConnectBtn,
 body[data-viewmode="link"] #adminBtn,
-body[data-viewmode="link"] #refreshBtn,
-body[data-viewmode="link"] .user-chip,
-body[data-viewmode="link"] #logoutBtn { display: none !important; }
+body[data-viewmode="link"] #shareBtn,
+body[data-viewmode="link"] .tb-secondary,
+body[data-viewmode="link"] .tb-overflow-btn,
+body[data-viewmode="link"] .user-menu { display: none !important; }
 body[data-viewmode="link"] .dash-title { pointer-events: none; }
 
 /* ===== Tabs (dashboard views) ===== */
@@ -730,28 +762,47 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 <!-- ===== Toolbar ===== -->
 <div class="toolbar">
 
-  <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false">
-  <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
-  <button class="btn ghost sm" id="newDashBtn" title="New dashboard"><span class="btn-icon">＋</span><span class="btn-label">Dashboard</span></button>
-  <button class="btn ghost sm" id="delDashBtn" title="Delete this dashboard">🗑</button>
-  <span class="save-indicator saved" id="saveIndicator">✓ Saved</span>
-  <span class="badge" id="rowBadge">0 rows</span>
-  <span class="badge" id="backendBadge" title="Backend connection status">local</span>
-  <div class="spacer"></div>
-  <button class="btn ghost sm" id="refreshBtn" title="Refresh all charts"><span class="btn-icon">↺</span><span class="btn-label">Refresh</span></button>
-  <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
-  <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">🛢</span><span class="btn-label">Connect DB</span></button>
-  <button class="btn ghost sm" id="adminBtn" title="Admin panel" style="display:none"><span class="btn-icon">⚙</span><span class="btn-label">Admin</span></button>
-  <button class="btn ghost sm" id="shareBtn" title="Share this dashboard"><span class="btn-icon">🔗</span><span class="btn-label">Share</span></button>
-  <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
-  <div class="user-chip" id="userChip" title="Signed in">
-    <span class="user-avatar" id="userAvatar">?</span>
-    <span class="user-meta">
-      <span class="user-name" id="userName">…</span>
-      <span class="user-role" id="userRole"></span>
-    </span>
+  <!-- Left group: brand + dashboard name/picker -->
+  <div class="tb-group tb-left">
+    <div class="tb-logo">N</div>
+    <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false">
+    <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
+    <button class="btn ghost sm icon-only" id="newDashBtn" title="New dashboard">＋</button>
+    <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard">🗑</button>
+    <span class="save-indicator saved" id="saveIndicator" title="Save status">✓ Saved</span>
   </div>
-  <button class="btn ghost sm" id="logoutBtn" title="Log out"><span class="btn-icon">⎋</span><span class="btn-label">Logout</span></button>
+
+  <div class="spacer"></div>
+
+  <!-- Right group: secondary (overflow) + primary actions + user menu -->
+  <div class="tb-group tb-right">
+    <!-- secondary controls — inline on wide screens, in the ⋯ menu on narrow -->
+    <div class="tb-secondary" id="tbSecondary">
+      <span class="badge" id="rowBadge">0 rows</span>
+      <span class="badge" id="backendBadge" title="Backend connection status">local</span>
+      <button class="btn ghost sm" id="refreshBtn" title="Refresh all charts"><span class="btn-icon">↺</span><span class="btn-label">Refresh</span></button>
+      <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
+    </div>
+    <button class="btn ghost sm icon-only tb-overflow-btn" id="overflowBtn" title="More" aria-haspopup="true">⋯</button>
+
+    <!-- primary actions — always visible -->
+    <button class="btn ghost sm" id="shareBtn" title="Share this dashboard"><span class="btn-icon">🔗</span><span class="btn-label">Share</span></button>
+    <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">🛢</span><span class="btn-label">Connect DB</span></button>
+    <button class="btn ghost sm" id="adminBtn" title="Admin panel" style="display:none"><span class="btn-icon">⚙</span><span class="btn-label">Admin</span></button>
+    <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
+
+    <!-- user menu (avatar → dropdown) -->
+    <div class="user-menu">
+      <button class="user-avatar-btn" id="userMenuBtn" title="Account" aria-haspopup="true"><span id="userAvatar">?</span></button>
+      <div class="user-dropdown" id="userDropdown">
+        <div class="ud-head">
+          <div class="ud-name" id="userName">…</div>
+          <div class="ud-role" id="userRole"></div>
+        </div>
+        <button class="btn ghost sm" id="logoutBtn"><span class="btn-icon">⎋</span> Log out</button>
+      </div>
+    </div>
+  </div>
 
 </div>
 
@@ -2624,7 +2675,7 @@ async function loadCurrentUser() {
     $('#userName').textContent = name;
     $('#userRole').textContent = user.role;
     $('#userAvatar').textContent = (name || '?').trim().charAt(0) || '?';
-    $('#userChip').title = `${name} · ${user.role}`;
+    $('#userMenuBtn').title = `${name} · ${user.role}`;
     applyRoleUI();
   } catch (e) {
     location.href = '/login';   // not authenticated
@@ -2873,6 +2924,10 @@ function init() {
     try { await API.logout(); } catch(e) {}
     location.href = '/login';
   };
+  // Toolbar overflow (⋯) + user-avatar dropdown
+  $('#overflowBtn').onclick = (e) => { e.stopPropagation(); $('#userDropdown').classList.remove('open'); $('#tbSecondary').classList.toggle('open'); };
+  $('#userMenuBtn').onclick = (e) => { e.stopPropagation(); $('#tbSecondary').classList.remove('open'); $('#userDropdown').classList.toggle('open'); };
+  document.addEventListener('click', () => { $('#tbSecondary')?.classList.remove('open'); $('#userDropdown')?.classList.remove('open'); });
 
   // The data-source sidebar was removed; all data loading now happens inside
   // the graph builder. We still prime the shared table list the builder reads.
