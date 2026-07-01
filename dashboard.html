@@ -195,11 +195,28 @@ button { font-family: inherit; cursor: pointer; }
 .perm-select.p-editor { border-color: var(--accent-2); color: var(--accent-2); }
 .admin-row .au-chevron { color: var(--text-dim); font-size: 16px; }
 .up-role-row { display: flex; align-items: center; gap: 12px; }
-.up-rows { display: flex; flex-direction: column; gap: 8px; }
-.up-row { display: flex; align-items: center; gap: 8px; }
-.up-row .up-graph { flex: 1; min-width: 0; background: var(--panel-2); color: var(--text); border: 1.5px solid var(--border); border-radius: 8px; padding: 7px 9px; font-size: 12.5px; font-family: inherit; outline: none; }
-.up-row .up-graph:focus { border-color: var(--accent); }
-.up-row .up-perm { width: 110px; flex: none; }
+/* Graph permission cards */
+.up-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; max-height: 52vh; overflow-y: auto; padding: 2px; }
+.graph-card { position: relative; display: flex; gap: 11px; align-items: center; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; transition: border-color .15s, transform .15s, box-shadow .15s; animation: gcIn .22s cubic-bezier(.16,1,.3,1) both; }
+.graph-card:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(124,92,252,0.12); transform: translateY(-1px); }
+@keyframes gcIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.gc-thumb { width: 46px; height: 46px; flex: none; border-radius: 10px; display: grid; place-items: center; font-size: 22px; background: linear-gradient(160deg, rgba(124,92,252,0.18), rgba(0,229,176,0.12)); border: 1px solid var(--border); }
+.gc-body { flex: 1; min-width: 0; }
+.gc-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gc-dash { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gc-perm { display: inline-block; margin-top: 5px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.gc-perm.p-hidden { color: var(--text-dim); background: rgba(255,255,255,0.06); }
+.gc-perm.p-viewer { color: var(--accent); background: rgba(124,92,252,0.14); }
+.gc-perm.p-editor { color: var(--accent-2); background: rgba(0,229,176,0.14); }
+.gc-menu-btn { flex: none; width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text-dim); font-size: 18px; cursor: pointer; line-height: 1; transition: all .15s; }
+.gc-menu-btn:hover { background: rgba(124,92,252,0.12); color: var(--accent); }
+.gc-menu { position: absolute; top: 44px; right: 10px; z-index: 5; min-width: 148px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; display: none; animation: gcMenu .14s ease both; }
+.graph-card.menu-open .gc-menu { display: block; }
+@keyframes gcMenu { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.gc-menu button { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: transparent; border: none; color: var(--text); font-size: 13px; font-family: inherit; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+.gc-menu button:hover { background: var(--panel-2); }
+.gc-menu button.active { color: var(--accent); font-weight: 600; }
+.gc-menu button.danger:hover { color: var(--danger); }
 .perm-select { background: var(--panel-2); color: var(--text); border: 1.5px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: inherit; outline: none; }
 .perm-select:focus { border-color: var(--accent); }
 .perm-select.p-none { color: var(--text-dim); }
@@ -1066,27 +1083,28 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   </div>
 </div>
 
-<!-- ===== Per-user permissions modal ===== -->
+<!-- ===== Per-user permissions modal (graph cards) ===== -->
 <div class="modal-overlay" id="userPermOverlay">
-  <div class="builder" role="dialog" aria-modal="true" style="width:min(680px,96vw)">
+  <div class="builder" role="dialog" aria-modal="true" style="width:min(760px,96vw)">
     <div class="builder-head">
-      <h2 id="upTitle">User permissions</h2>
+      <div>
+        <h2 id="upTitle" style="margin:0">User permissions</h2>
+        <div id="upEmail" class="bhint" style="margin:2px 0 0"></div>
+      </div>
       <button class="icon-btn" id="userPermClose" title="Close">Close</button>
     </div>
-    <div class="up-role-row">
-      <label class="bfield-label" for="upRole">Permission</label>
-      <select class="binput" id="upRole" style="max-width:180px">
+    <div class="up-role-row" style="margin:6px 0 4px">
+      <label class="bfield-label" for="upRole">Account type</label>
+      <select class="binput" id="upRole" style="max-width:160px">
         <option value="viewer">Viewer</option>
         <option value="editor">Editor</option>
       </select>
     </div>
-    <div class="bfield-label" style="margin:18px 0 8px">Graph permissions</div>
-    <div class="bhint" style="margin-bottom:10px">Add each graph this user may access and choose Viewer (see only) or Editor (see &amp; edit). Any graph not listed is hidden from them.</div>
-    <div id="upRows" class="up-rows"></div>
-    <button class="btn sm" id="upAddGraph" type="button" style="margin-top:8px">+ Add graph</button>
+    <div class="bfield-label" style="margin:18px 0 8px">Graphs</div>
+    <div class="bhint" style="margin-bottom:12px">Use each graph's ⋮ menu to set access — <b>View</b> (read-only), <b>Edit</b>, or <b>Hide</b> (removed from their dashboard, not deleted).</div>
+    <div id="upCards" class="up-cards"></div>
     <div class="builder-actions" style="margin-top:18px">
-      <button class="btn" id="userPermCancel">Cancel</button>
-      <button class="btn primary" id="userPermSave">Save permissions</button>
+      <button class="btn primary" id="userPermSave">Done</button>
     </div>
   </div>
 </div>
@@ -2953,66 +2971,82 @@ async function renderAdminUsers() {
 }
 
 /* --- per-user detail modal: account permission + dynamic per-graph rows --- */
-let upRows = [];   // [{ widget_id, permission }]
+let upPermMap = {};   // widget_id -> 'viewer' | 'editor'  (absent = hidden)
 async function openUserPerms(user) {
   if (!user) return;
   upUser = user;
   $('#userPermOverlay').classList.add('open');
-  $('#upTitle').textContent = `${user.name || user.email} · ${escapeHtml(user.email)}`;
+  $('#upTitle').textContent = user.name || user.email;
+  $('#upEmail').textContent = user.email;
   $('#upRole').value = user.permission;
-  const wrap = $('#upRows');
+  const wrap = $('#upCards');
   wrap.innerHTML = '<div class="bhint">Loading…</div>';
   try {
     adminWidgetsCache = (await API.adminWidgets()).widgets;
     const { permissions } = await API.adminPermissions(user.id);
-    // pre-populate existing rows (dropping any widgets that no longer exist)
-    upRows = permissions
-      .filter(p => adminWidgetsCache.some(w => w.widget_id === p.widget_id))
-      .map(p => ({ widget_id: p.widget_id, permission: p.permission }));
-    renderUpRows();
+    upPermMap = {};
+    permissions.forEach(p => { upPermMap[p.widget_id] = p.permission; });
+    renderUpCards();
   } catch (e) { wrap.innerHTML = '<div class="bhint">Failed to load: ' + escapeHtml(e.message) + '</div>'; }
 }
-function widgetLabel(w) { return (w.title || w.widget_id) + (w.dashboard_title ? ' · ' + w.dashboard_title : ''); }
-function renderUpRows() {
-  const wrap = $('#upRows');
+function permLabel(p) { return p === 'editor' ? 'Edit' : p === 'viewer' ? 'View' : 'Hidden'; }
+function renderUpCards() {
+  const wrap = $('#upCards');
   if (!adminWidgetsCache.length) { wrap.innerHTML = '<div class="bhint">No graphs exist yet.</div>'; return; }
-  const used = upRows.map(r => r.widget_id);
-  wrap.innerHTML = upRows.length ? upRows.map((row, i) => {
-    // this row's dropdown excludes graphs already chosen in OTHER rows (no duplicates)
-    const opts = adminWidgetsCache.filter(w => w.widget_id === row.widget_id || !used.includes(w.widget_id));
-    return `<div class="up-row">
-      <select class="up-graph" data-i="${i}">
-        ${opts.map(w => `<option value="${escapeHtml(w.widget_id)}" ${w.widget_id === row.widget_id ? 'selected' : ''}>${escapeHtml(widgetLabel(w))}</option>`).join('')}
-      </select>
-      <select class="perm-select up-perm p-${row.permission}" data-i="${i}">
-        <option value="viewer" ${row.permission === 'viewer' ? 'selected' : ''}>Viewer</option>
-        <option value="editor" ${row.permission === 'editor' ? 'selected' : ''}>Editor</option>
-      </select>
-      <button class="icon-btn danger" data-rm="${i}" title="Remove">✕</button>
+  wrap.innerHTML = adminWidgetsCache.map((w, i) => {
+    const cur = upPermMap[w.widget_id] || 'hidden';
+    const icon = TYPE_ICONS[w.type] || '📊';
+    return `<div class="graph-card" data-wid="${escapeHtml(w.widget_id)}" style="animation-delay:${Math.min(i * 25, 300)}ms">
+      <div class="gc-thumb">${icon}</div>
+      <div class="gc-body">
+        <div class="gc-name" title="${escapeHtml(w.title)}">${escapeHtml(w.title)}</div>
+        <div class="gc-dash">${escapeHtml(w.dashboard_title || '')}</div>
+        <span class="gc-perm p-${cur}">${permLabel(cur)}</span>
+      </div>
+      <button class="gc-menu-btn" title="Change access">⋮</button>
+      <div class="gc-menu">
+        <button data-set="viewer" class="${cur==='viewer'?'active':''}">👁 View</button>
+        <button data-set="editor" class="${cur==='editor'?'active':''}">✏️ Edit</button>
+        <button data-set="hide" class="danger ${cur==='hidden'?'active':''}">🚫 Hide</button>
+      </div>
     </div>`;
-  }).join('') : '<div class="bhint">No graphs assigned yet — click “+ Add graph”.</div>';
-  wrap.querySelectorAll('.up-graph').forEach(sel => sel.onchange = () => { upRows[+sel.dataset.i].widget_id = sel.value; renderUpRows(); });
-  wrap.querySelectorAll('.up-perm').forEach(sel => sel.onchange = () => { upRows[+sel.dataset.i].permission = sel.value; sel.className = 'perm-select up-perm p-' + sel.value; });
-  wrap.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { upRows.splice(+b.dataset.rm, 1); renderUpRows(); });
+  }).join('');
+  wrap.querySelectorAll('.graph-card').forEach(card => {
+    const wid = card.dataset.wid;
+    card.querySelector('.gc-menu-btn').onclick = (e) => {
+      e.stopPropagation();
+      const open = card.classList.contains('menu-open');
+      wrap.querySelectorAll('.graph-card').forEach(c => c.classList.remove('menu-open'));
+      if (!open) card.classList.add('menu-open');
+    };
+    card.querySelectorAll('.gc-menu button').forEach(b => {
+      b.onclick = (e) => { e.stopPropagation(); setGraphPerm(wid, b.dataset.set); card.classList.remove('menu-open'); };
+    });
+  });
 }
-function upAddGraph() {
-  const used = new Set(upRows.map(r => r.widget_id));
-  const next = adminWidgetsCache.find(w => !used.has(w.widget_id));
-  if (!next) { toast('Every graph is already in the list', true); return; }
-  upRows.push({ widget_id: next.widget_id, permission: 'viewer' });
-  renderUpRows();
+// close any open card menu when clicking elsewhere in the modal
+document.addEventListener('click', () => $$('#upCards .graph-card.menu-open').forEach(c => c.classList.remove('menu-open')));
+
+async function setGraphPerm(wid, action) {
+  if (action === 'hide') delete upPermMap[wid];
+  else upPermMap[wid] = action;   // 'viewer' | 'editor'
+  renderUpCards();
+  try {
+    const permissions = Object.entries(upPermMap).map(([widget_id, permission]) => ({ widget_id, permission }));
+    await API.adminSavePermissions(upUser.id, permissions);
+    toast(action === 'hide' ? 'Graph hidden' : action === 'editor' ? 'Edit access granted' : 'View access granted');
+  } catch (e) { toast('Save failed: ' + e.message, true); }
 }
 function closeUserPerms() { $('#userPermOverlay').classList.remove('open'); upUser = null; }
-async function saveUserPerms() {
-  if (!upUser) return;
+async function saveUserPerms() {   // "Done" — persist account type + close
+  if (!upUser) return closeUserPerms();
   const newPerm = $('#upRole').value;
-  if (upUser.permission === 'editor' && newPerm === 'viewer' &&
-      !confirm(`This will remove all edit access for ${upUser.name || upUser.email}. Continue?`)) return;
-  const permissions = upRows.map(r => ({ widget_id: r.widget_id, permission: r.permission }));
   try {
-    if (newPerm !== upUser.permission) { await API.adminSetPermission(upUser.id, newPerm); upUser.permission = newPerm; }
-    await API.adminSavePermissions(upUser.id, permissions);
-    toast('Permissions saved');
+    if (newPerm !== upUser.permission) {
+      if (upUser.permission === 'editor' && newPerm === 'viewer' &&
+          !confirm(`This will remove all edit access for ${upUser.name || upUser.email}. Continue?`)) return;
+      await API.adminSetPermission(upUser.id, newPerm); upUser.permission = newPerm;
+    }
     closeUserPerms();
     renderAdminUsers();
   } catch (e) { toast('Save failed: ' + e.message, true); }
@@ -3106,9 +3140,7 @@ function init() {
   $('#adminClose').onclick = closeAdmin;
   $('#adminOverlay').addEventListener('click', e=>{ if (e.target.id==='adminOverlay') closeAdmin(); });
   $('#userPermClose').onclick = closeUserPerms;
-  $('#userPermCancel').onclick = closeUserPerms;
   $('#userPermSave').onclick = saveUserPerms;
-  $('#upAddGraph').onclick = upAddGraph;
   $('#userPermOverlay').addEventListener('click', e=>{ if (e.target.id==='userPermOverlay') closeUserPerms(); });
   // Share modal
   $('#shareBtn').onclick = openShare;

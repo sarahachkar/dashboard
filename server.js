@@ -368,7 +368,7 @@ function collectAllWidgets() {
   for (const d of db.prepare('SELECT id,title,state_json FROM dashboards').all()) {
     const st = safeParse(d.state_json);
     (st.views || []).forEach(v => (v.widgets || []).forEach(w => {
-      if (w && w.id) out.push({ widget_id: w.id, title: w.title || w.type || w.id, dashboard_id: d.id, dashboard_title: d.title });
+      if (w && w.id) out.push({ widget_id: w.id, title: w.title || w.type || w.id, type: w.type || 'bar', dashboard_id: d.id, dashboard_title: d.title });
     }));
   }
   return out;
