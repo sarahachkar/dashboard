@@ -167,18 +167,28 @@ button { font-family: inherit; cursor: pointer; }
 .admin-toggle input:checked + .track { background: var(--accent-2); }
 .admin-toggle input:checked + .track::before { transform: translateX(18px); }
 
-/* ===== Viewer role: read-only — hide all editing affordances ===== */
-body[data-role="viewer"] #newGraphBtn,
-body[data-role="viewer"] #openConnectBtn,
-body[data-role="viewer"] #newDashBtn,
-body[data-role="viewer"] #delDashBtn,
-body[data-role="viewer"] #saveIndicator,
-body[data-role="viewer"] .w-controls,
-body[data-role="viewer"] .w-foot,
-body[data-role="viewer"] .add-card-fab,
-body[data-role="viewer"] #viewTabs > button.btn,
-body[data-role="viewer"] .view-tab .x,
-body[data-role="viewer"] .empty-canvas .btn { display: none !important; }
+/* ===== Read-only mode — hide editing affordances for the CURRENT dashboard
+   (a dashboard you don't own, a granted/shared one, or a public /view link).
+   You can still create your own dashboards, so #newDashBtn stays visible. ===== */
+body[data-readonly="true"] #newGraphBtn,
+body[data-readonly="true"] #delDashBtn,
+body[data-readonly="true"] #shareBtn,
+body[data-readonly="true"] #saveIndicator,
+body[data-readonly="true"] .w-controls,
+body[data-readonly="true"] .w-foot,
+body[data-readonly="true"] .add-card-fab,
+body[data-readonly="true"] #viewTabs > button.btn,
+body[data-readonly="true"] .view-tab .x,
+body[data-readonly="true"] .empty-canvas .btn { display: none !important; }
+/* Public share-link view: also hide the whole left chrome (picker, connect, etc.) */
+body[data-viewmode="link"] #dashPicker,
+body[data-viewmode="link"] #newDashBtn,
+body[data-viewmode="link"] #openConnectBtn,
+body[data-viewmode="link"] #adminBtn,
+body[data-viewmode="link"] #refreshBtn,
+body[data-viewmode="link"] .user-chip,
+body[data-viewmode="link"] #logoutBtn { display: none !important; }
+body[data-viewmode="link"] .dash-title { pointer-events: none; }
 
 /* ===== Tabs (dashboard views) ===== */
 .view-tabs { display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; background: var(--panel); border-bottom: 1px solid rgba(124,92,252,0.25); position: fixed; top: var(--toolbarH, 56px); left: 0; right: 0; z-index: 45; }
@@ -732,6 +742,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
   <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">🛢</span><span class="btn-label">Connect DB</span></button>
   <button class="btn ghost sm" id="adminBtn" title="Admin panel" style="display:none"><span class="btn-icon">⚙</span><span class="btn-label">Admin</span></button>
+  <button class="btn ghost sm" id="shareBtn" title="Share this dashboard"><span class="btn-icon">🔗</span><span class="btn-label">Share</span></button>
   <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
   <div class="user-chip" id="userChip" title="Signed in">
     <span class="user-avatar" id="userAvatar">?</span>
@@ -932,6 +943,30 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   </div>
 </div>
 
+<!-- ===== Share modal ===== -->
+<div class="modal-overlay" id="shareOverlay">
+  <div class="builder" role="dialog" aria-modal="true" style="width:min(560px,96vw)">
+    <div class="builder-head">
+      <h2>Share dashboard</h2>
+      <button class="icon-btn" id="shareClose" title="Close">Close</button>
+    </div>
+
+    <div class="bfield-label" style="margin-bottom:8px">Public read-only link</div>
+    <div class="bhint" style="margin-bottom:10px">Anyone with this link can view this dashboard in read-only mode — no account needed.</div>
+    <div id="shareLinkRow" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <input class="input" id="shareLinkInput" readonly placeholder="No link yet" style="flex:1">
+      <button class="btn sm" id="shareCopyBtn">Copy</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn sm primary" id="shareCreateBtn">Create link</button>
+      <button class="btn sm" id="shareRevokeBtn">Revoke</button>
+    </div>
+
+    <div class="bfield-label" style="margin:22px 0 8px">Grant read-only access to specific users</div>
+    <div id="shareGrants" class="admin-users"></div>
+  </div>
+</div>
+
 <!-- ===== Admin panel modal ===== -->
 <div class="modal-overlay" id="adminOverlay">
   <div class="builder" role="dialog" aria-modal="true" style="width:min(760px,96vw)">
@@ -968,9 +1003,11 @@ const LS_KEY = 'nexus_dashboard_v2';
 const API_BASE = (location.protocol === 'file:') ? 'http://localhost:4000' : '';
 let BACKEND = false;          // becomes true once /api/health responds
 let currentUser = null;       // { id, email, name, role }
-const isViewer = () => currentUser && currentUser.role === 'viewer';
+let canEditCurrent = true;    // can the signed-in user edit the CURRENTLY open dashboard?
+let viewMode = null;          // 'link' when viewing a public /view/<token> share link
 const isAdmin  = () => currentUser && currentUser.role === 'admin';
-function requireEdit() { if (isViewer()) { toast('Read-only access — your role cannot edit', true); return false; } return true; }
+function requireEdit() { if (!canEditCurrent) { toast('This dashboard is read-only', true); return false; } return true; }
+function applyEditableUI() { document.body.dataset.readonly = canEditCurrent ? 'false' : 'true'; }
 const API = {
   async _fetch(path, opts) {
     const r = await fetch(API_BASE + path, Object.assign({ headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' }, opts));
@@ -996,6 +1033,12 @@ const API = {
   createDashboard(title, state) { return this._fetch('/api/dashboards', { method: 'POST', body: JSON.stringify({ title, state }) }); },
   updateDashboard(id, title, state) { return this._fetch('/api/dashboards/' + id, { method: 'PUT', body: JSON.stringify({ title, state }) }); },
   deleteDashboard(id) { return this._fetch('/api/dashboards/' + id, { method: 'DELETE' }); },
+  shareDashboard(id) { return this._fetch('/api/dashboards/' + id + '/share', { method: 'POST' }); },
+  unshareDashboard(id) { return this._fetch('/api/dashboards/' + id + '/share', { method: 'DELETE' }); },
+  listGrants(id) { return this._fetch('/api/dashboards/' + id + '/grants'); },
+  setGrant(id, user_id, granted) { return this._fetch('/api/dashboards/' + id + '/grants', { method: 'POST', body: JSON.stringify({ user_id, granted }) }); },
+  sharedDashboard(token) { return this._fetch('/api/shared/' + token); },
+  listUsers() { return this._fetch('/api/users'); },
   connectDb(cs) { return this._fetch('/api/connect', { method: 'POST', body: JSON.stringify({ connectionString: cs }) }); },
   clearTable(table) { return this._fetch('/api/clear', { method: 'POST', body: JSON.stringify({ table }) }); },
   disconnect() { return this._fetch('/api/disconnect', { method: 'POST' }); },
@@ -1359,8 +1402,10 @@ async function loadDashboards() {
     dashboardsList = dashboards || [];
     if (!dashboardsList.length) {
       const created = await API.createDashboard(state.title || 'My Dashboard', serializeState());
-      dashboardsList = [created];
+      dashboardsList = [{ ...created, mine: true }];
       state.id = created.id;
+      state.owner_id = currentUser && currentUser.id;
+      canEditCurrent = true; applyEditableUI();
       renderDashboardPicker();
       setSaveIndicator('saved');
     } else {
@@ -1373,8 +1418,14 @@ async function openDashboard(id) {
   const d = await API.getDashboard(id);
   state.id = d.id;
   state.title = d.title;
+  state.owner_id = d.owner_id;
+  state.visibility = d.visibility;
+  state.share_token = d.share_token || null;
+  canEditCurrent = d.canEdit !== false;   // server-computed: owner or admin
   applyState(d.state);
   $('#dashTitle').value = state.title;
+  $('#dashTitle').readOnly = !canEditCurrent;
+  applyEditableUI();
   renderDashboardPicker();
   renderAll();
   setSaveIndicator('saved');
@@ -1401,8 +1452,10 @@ async function deleteDashboard() {
 
 function renderDashboardPicker() {
   const sel = $('#dashPicker'); if (!sel) return;
-  sel.innerHTML = dashboardsList.map(d =>
-    `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}</option>`).join('');
+  sel.innerHTML = dashboardsList.map(d => {
+    const tag = d.mine === false ? (d.visibility === 'shared' ? ' (shared)' : ' (view-only)') : '';
+    return `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}${tag}</option>`;
+  }).join('');
 }
 
 /* =====================================================================
@@ -2578,12 +2631,12 @@ async function loadCurrentUser() {
   }
 }
 
-/* Hide/disable editing controls based on role. Backend enforces this too. */
+/* Show the admin button only for admins. Per-dashboard edit rights are
+   handled separately by applyEditableUI (based on the open dashboard). */
 function applyRoleUI() {
   const role = (currentUser && currentUser.role) || 'viewer';
   document.body.dataset.role = role;
   const adminBtn = $('#adminBtn'); if (adminBtn) adminBtn.style.display = role === 'admin' ? '' : 'none';
-  const title = $('#dashTitle'); if (title) title.readOnly = role === 'viewer';
 }
 
 /* =====================================================================
@@ -2655,6 +2708,54 @@ function refreshBdConnSelect() {
 }
 // The builder's currently selected data source ('' = built-in sqlite)
 function activeBuilderConn() { const sel = $('#bdConnSelect'); return sel ? sel.value : ''; }
+
+/* =====================================================================
+   Share — public read-only link + per-user read-only grants
+   ===================================================================== */
+function shareUrl(token) { return location.origin + '/view/' + token; }
+function openShare() {
+  if (!canEditCurrent || !state.id) return toast('You can only share dashboards you own', true);
+  $('#shareOverlay').classList.add('open');
+  renderShareLink();
+  renderShareGrants();
+}
+function closeShare() { $('#shareOverlay').classList.remove('open'); }
+function renderShareLink() {
+  const input = $('#shareLinkInput');
+  if (state.share_token) {
+    input.value = shareUrl(state.share_token);
+    $('#shareRevokeBtn').style.display = '';
+    $('#shareCreateBtn').textContent = 'Regenerate';
+  } else {
+    input.value = '';
+    $('#shareRevokeBtn').style.display = 'none';
+    $('#shareCreateBtn').textContent = 'Create link';
+  }
+}
+async function renderShareGrants() {
+  const wrap = $('#shareGrants');
+  wrap.innerHTML = '<div class="bhint">Loading…</div>';
+  try {
+    const [{ users }, { user_ids }] = await Promise.all([API.listUsers(), API.listGrants(state.id)]);
+    const granted = new Set(user_ids);
+    const others = users.filter(u => u.id !== state.owner_id);
+    if (!others.length) { wrap.innerHTML = '<div class="bhint">No other users to share with yet.</div>'; return; }
+    wrap.innerHTML = others.map(u => `
+      <div class="admin-row">
+        <div class="au-info"><div class="au-name">${escapeHtml(u.name || '(no name)')}</div><div class="au-email">${escapeHtml(u.email)}</div></div>
+        <label class="admin-toggle">
+          <input type="checkbox" data-uid="${u.id}" ${granted.has(u.id) ? 'checked' : ''}>
+          <span class="track"></span>
+        </label>
+      </div>`).join('');
+    wrap.querySelectorAll('input[data-uid]').forEach(cb => {
+      cb.onchange = async () => {
+        try { await API.setGrant(state.id, +cb.dataset.uid, cb.checked); }
+        catch (e) { toast('Failed: ' + e.message, true); cb.checked = !cb.checked; }
+      };
+    });
+  } catch (e) { wrap.innerHTML = '<div class="bhint">Could not load users: ' + escapeHtml(e.message) + '</div>'; }
+}
 
 /* =====================================================================
    Admin panel — manage roles + per-user widget visibility (admin only)
@@ -2733,7 +2834,33 @@ async function refreshAdminWidgetToggles() {
   });
 }
 
+/* Public read-only view of a shared dashboard (/view/<token>) — no login. */
+async function initViewMode(token) {
+  viewMode = 'link';
+  document.body.dataset.viewmode = 'link';
+  canEditCurrent = false;
+  applyEditableUI();
+  Chart.defaults.color = textColor();
+  Chart.defaults.font.family = 'Inter';
+  initState();
+  try {
+    const d = await API.sharedDashboard(token);
+    state.id = d.id; state.title = d.title;
+    applyState(d.state);
+    $('#dashTitle').value = d.title;
+    refreshDateSelectors();
+    renderAll();
+    syncStickyOffsets();
+  } catch (e) {
+    document.body.innerHTML = '<div style="display:grid;place-items:center;height:100vh;color:#8890b0;font-family:Inter,sans-serif;text-align:center;padding:20px">This shared link is invalid or has been revoked.</div>';
+  }
+}
+
 function init() {
+  // Public share-link view? Render read-only and skip the authed app entirely.
+  const vm = location.pathname.match(/^\/view\/(.+)$/);
+  if (vm) { initViewMode(decodeURIComponent(vm[1])); return; }
+
   initState();
   Chart.defaults.color = textColor();
   Chart.defaults.font.family = 'Inter';
@@ -2790,6 +2917,22 @@ function init() {
   $('#adminBtn').onclick = openAdmin;
   $('#adminClose').onclick = closeAdmin;
   $('#adminOverlay').addEventListener('click', e=>{ if (e.target.id==='adminOverlay') closeAdmin(); });
+  // Share modal
+  $('#shareBtn').onclick = openShare;
+  $('#shareClose').onclick = closeShare;
+  $('#shareOverlay').addEventListener('click', e=>{ if (e.target.id==='shareOverlay') closeShare(); });
+  $('#shareCreateBtn').onclick = async () => {
+    try { const { share_token } = await API.shareDashboard(state.id); state.share_token = share_token; renderShareLink(); toast('Share link ready'); }
+    catch(e){ toast('Failed: '+e.message, true); }
+  };
+  $('#shareRevokeBtn').onclick = async () => {
+    try { await API.unshareDashboard(state.id); state.share_token = null; renderShareLink(); toast('Link revoked'); }
+    catch(e){ toast('Failed: '+e.message, true); }
+  };
+  $('#shareCopyBtn').onclick = () => {
+    const v = $('#shareLinkInput').value; if (!v) return;
+    navigator.clipboard?.writeText(v).then(()=>toast('Link copied'));
+  };
   $('#builderClose').onclick = closeBuilder;
   $('#builderCancel').onclick = closeBuilder;
   $('#builderSave').onclick = saveBuilder;

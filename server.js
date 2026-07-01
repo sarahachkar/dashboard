@@ -461,6 +461,12 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     }
 
+    /* ---------------- User directory (for sharing/grants) ---------------- */
+    if (p === '/api/users' && m === 'GET') {
+      const rows = db.prepare('SELECT id,name,email,role FROM app_users ORDER BY name, email').all();
+      return sendJson(res, 200, { users: rows });
+    }
+
     /* ---------------- Admin (admin-only) ---------------- */
     if (p.startsWith('/api/admin/')) {
       if (authUser.role !== 'admin') return sendJson(res, 403, { error: 'Admin only' });
