@@ -549,9 +549,9 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/api/admin/')) {
       if (!requireAdmin(authUser, res)) return;
 
-      // Only 'user' accounts are manageable here — admins never appear.
+      // Everyone who isn't an admin is manageable here (NULL/legacy → treated as user).
       if (p === '/api/admin/users' && m === 'GET')
-        return sendJson(res, 200, { users: db.prepare("SELECT id,email,name,permission,last_active,created_at FROM app_users WHERE account_type='user' ORDER BY created_at").all() });
+        return sendJson(res, 200, { users: db.prepare("SELECT id,email,name,permission,last_active,created_at FROM app_users WHERE account_type IS NULL OR account_type <> 'admin' ORDER BY created_at").all() });
 
       // Set a user's permission (viewer|editor). Admins cannot be edited here.
       if (p.match(/^\/api\/admin\/users\/\d+\/permission$/) && m === 'PATCH') {

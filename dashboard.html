@@ -1088,9 +1088,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       <button class="btn sm primary" id="shareCreateBtn">Create link</button>
       <button class="btn sm" id="shareRevokeBtn">Revoke</button>
     </div>
-
-    <div class="bfield-label" style="margin:22px 0 8px">Grant read-only access to specific users</div>
-    <div id="shareGrants" class="admin-users"></div>
+    <div class="bhint" style="margin-top:16px">Per-user graph access is managed by an admin in the Admin panel.</div>
   </div>
 </div>
 
@@ -2940,7 +2938,6 @@ function openShare() {
   if (!canEditCurrent || !state.id) return toast('You can only share dashboards you own', true);
   $('#shareOverlay').classList.add('open');
   renderShareLink();
-  renderShareGrants();
 }
 function closeShare() { $('#shareOverlay').classList.remove('open'); }
 function renderShareLink() {
@@ -2954,30 +2951,6 @@ function renderShareLink() {
     $('#shareRevokeBtn').style.display = 'none';
     $('#shareCreateBtn').textContent = 'Create link';
   }
-}
-async function renderShareGrants() {
-  const wrap = $('#shareGrants');
-  wrap.innerHTML = '<div class="bhint">Loading…</div>';
-  try {
-    const [{ users }, { user_ids }] = await Promise.all([API.listUsers(), API.listGrants(state.id)]);
-    const granted = new Set(user_ids);
-    const others = users.filter(u => u.id !== state.owner_id);
-    if (!others.length) { wrap.innerHTML = '<div class="bhint">No other users to share with yet.</div>'; return; }
-    wrap.innerHTML = others.map(u => `
-      <div class="admin-row">
-        <div class="au-info"><div class="au-name">${escapeHtml(u.name || '(no name)')}</div><div class="au-email">${escapeHtml(u.email)}</div></div>
-        <label class="admin-toggle">
-          <input type="checkbox" data-uid="${u.id}" ${granted.has(u.id) ? 'checked' : ''}>
-          <span class="track"></span>
-        </label>
-      </div>`).join('');
-    wrap.querySelectorAll('input[data-uid]').forEach(cb => {
-      cb.onchange = async () => {
-        try { await API.setGrant(state.id, +cb.dataset.uid, cb.checked); }
-        catch (e) { toast('Failed: ' + e.message, true); cb.checked = !cb.checked; }
-      };
-    });
-  } catch (e) { wrap.innerHTML = '<div class="bhint">Could not load users: ' + escapeHtml(e.message) + '</div>'; }
 }
 
 /* =====================================================================
