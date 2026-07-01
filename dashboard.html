@@ -184,6 +184,10 @@ button { font-family: inherit; cursor: pointer; }
 .admin-row.clickable { cursor: pointer; transition: border-color .15s, background .15s; }
 .admin-row.clickable:hover { border-color: var(--accent); background: var(--panel-2); }
 .admin-row .au-rolebadge { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; color: var(--accent); background: rgba(124,92,252,0.12); padding: 3px 9px; border-radius: 999px; }
+.admin-row .au-lastactive { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.admin-row .au-name[data-open]:hover { color: var(--accent); text-decoration: underline; }
+.perm-select.p-viewer { color: var(--text-dim); }
+.perm-select.p-editor { border-color: var(--accent-2); color: var(--accent-2); }
 .admin-row .au-chevron { color: var(--text-dim); font-size: 16px; }
 .up-role-row { display: flex; align-items: center; gap: 12px; }
 .perm-select { background: var(--panel-2); color: var(--text); border: 1.5px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: inherit; outline: none; }
@@ -421,14 +425,18 @@ select.input { cursor: pointer; }
 .widget.minimized .w-config select { height: 28px; font-size: 11px; }
 /* Maximized — full-screen overlay (must sit above the fixed toolbar/view-tabs) */
 .widget.maximized {
-  position: fixed; inset: 28px; z-index: 301; margin: 0; grid-column: auto !important;
+  position: fixed; inset: 28px; z-index: 9999; margin: 0; grid-column: auto !important;
+  /* fully OPAQUE background (override the semi-transparent pastel gradient) so
+     nothing behind bleeds through the chart */
+  background: var(--panel) !important;
   box-shadow: 0 24px 70px rgba(16,24,40,0.28); animation: maxIn .2s cubic-bezier(0.16,1,0.3,1);
 }
 .widget.maximized:hover { transform: none; }   /* no hover-jiggle while maximized */
 @keyframes maxIn { from { opacity: .4; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
 .widget.maximized .w-body { max-height: none; }
 .widget.maximized .w-body canvas { max-height: none !important; }
-.maximize-backdrop { position: fixed; inset: 0; background: rgba(10,13,26,.78); z-index: 300; opacity: 0; transition: opacity .2s ease; }
+/* solid, theme-aware backdrop — fully covers the dashboard underneath */
+.maximize-backdrop { position: fixed; inset: 0; background: var(--bg); z-index: 9998; opacity: 0; transition: opacity .2s ease; }
 .maximize-backdrop.show { opacity: 1; }
 
 /* ===== Header (Issue 3) ===== */
@@ -1056,15 +1064,14 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       <button class="icon-btn" id="userPermClose" title="Close">Close</button>
     </div>
     <div class="up-role-row">
-      <label class="bfield-label" for="upRole">Role</label>
+      <label class="bfield-label" for="upRole">Permission</label>
       <select class="binput" id="upRole" style="max-width:180px">
-        <option value="viewer">viewer</option>
-        <option value="editor">editor</option>
-        <option value="admin">admin</option>
+        <option value="viewer">Viewer</option>
+        <option value="editor">Editor</option>
       </select>
     </div>
-    <div class="bfield-label" style="margin:18px 0 8px">Per-graph access</div>
-    <div class="bhint" style="margin-bottom:10px">No access = hidden · View only = can see · Edit = can see &amp; edit.</div>
+    <div class="bfield-label" style="margin:18px 0 8px">Graph access</div>
+    <div class="bhint" style="margin-bottom:10px">Tick the graphs this user may access. A viewer can only view them; an editor can also edit them.</div>
     <div id="upWidgets" class="admin-widgets"></div>
     <div class="builder-actions" style="margin-top:18px">
       <button class="btn" id="userPermCancel">Cancel</button>
@@ -1090,10 +1097,12 @@ const LS_KEY = 'nexus_dashboard_v2';
    ===================================================================== */
 const API_BASE = (location.protocol === 'file:') ? 'http://localhost:4000' : '';
 let BACKEND = false;          // becomes true once /api/health responds
-let currentUser = null;       // { id, email, name, role }
+let currentUser = null;       // { id, email, name, account_type, permission }
 let canEditCurrent = true;    // can the signed-in user edit the CURRENTLY open dashboard?
 let viewMode = null;          // 'link' when viewing a public /view/<token> share link
-const isAdmin  = () => currentUser && currentUser.role === 'admin';
+const isAdmin    = () => currentUser && currentUser.account_type === 'admin';
+const isEditorAcct = () => currentUser && (currentUser.account_type === 'admin' || currentUser.permission === 'editor');
+const isViewerAcct = () => currentUser && currentUser.account_type === 'user' && currentUser.permission === 'viewer';
 function requireEdit() { if (!canEditCurrent) { toast('This dashboard is read-only', true); return false; } return true; }
 function applyEditableUI() { document.body.dataset.readonly = canEditCurrent ? 'false' : 'true'; }
 // A widget is editable if you can edit the whole dashboard (owner/admin) OR
@@ -1111,7 +1120,7 @@ const API = {
   me() { return this._fetch('/api/auth/me'); },
   logout() { return this._fetch('/api/auth/logout', { method: 'POST' }); },
   adminUsers() { return this._fetch('/api/admin/users'); },
-  adminSetRole(id, role) { return this._fetch('/api/admin/users/' + id + '/role', { method: 'PUT', body: JSON.stringify({ role }) }); },
+  adminSetPermission(id, permission) { return this._fetch('/api/admin/users/' + id + '/permission', { method: 'PATCH', body: JSON.stringify({ permission }) }); },
   adminWidgets() { return this._fetch('/api/admin/widgets'); },
   adminPermissions(userId) { return this._fetch('/api/admin/permissions?user_id=' + userId); },
   adminSavePermissions(user_id, grants) { return this._fetch('/api/admin/permissions', { method: 'POST', body: JSON.stringify({ user_id, grants }) }); },
@@ -1493,7 +1502,10 @@ async function loadDashboards() {
   try {
     const { dashboards } = await API.listDashboards();
     dashboardsList = dashboards || [];
-    if (!dashboardsList.length) {
+    if (dashboardsList.length) {
+      await openDashboard(dashboardsList[0].id);
+    } else if (isEditorAcct()) {
+      // Only editors/admins can create dashboards.
       const created = await API.createDashboard(state.title || 'My Dashboard', serializeState());
       dashboardsList = [{ ...created, mine: true }];
       state.id = created.id;
@@ -1502,7 +1514,10 @@ async function loadDashboards() {
       renderDashboardPicker();
       setSaveIndicator('saved');
     } else {
-      await openDashboard(dashboardsList[0].id);
+      // Viewer with no granted graphs yet — show an empty read-only canvas.
+      canEditCurrent = false; applyEditableUI();
+      state.views = [{ name: 'Overview', widgets: [] }];
+      renderAll();
     }
   } catch (e) { console.warn('loadDashboards failed', e.message); }
 }
@@ -1615,29 +1630,37 @@ function buildWidget(w, idx) {
   const opt = (arr, sel) => arr.map(c=>`<option ${c===sel?'selected':''}>${escapeHtml(c)}</option>`).join('');
   const optBlank = (arr, sel) => `<option value="">— none —</option>` + arr.map(c=>`<option ${c===sel?'selected':''}>${escapeHtml(c)}</option>`).join('');
 
+  // Editing controls are only emitted into the DOM for editable widgets.
+  const canEditW = widgetEditable(w) && viewMode !== 'link';
+  const editControls = canEditW
+    ? `<button class="icon-btn" title="Edit graph" data-act="edit">✏️</button>`
+    : '';
+  const removeControl = canEditW
+    ? `<button class="icon-btn danger" title="Remove" data-act="remove">✕</button>`
+    : '';
+  const footHtml = canEditW ? `<div class="w-foot"><button class="w-edit-link" data-act="edit">Edit graph</button></div>` : '';
   el.innerHTML = `
-    <div class="widget-head" draggable="true">
-      
+    <div class="widget-head" draggable="${canEditW}">
+
       <div class="w-titlewrap">
-        <input class="w-title" value="${escapeHtml(w.title)}" spellcheck="false">
+        ${canEditW ? `<input class="w-title" value="${escapeHtml(w.title)}" spellcheck="false">`
+                   : `<div class="w-title" style="pointer-events:none">${escapeHtml(w.title)}</div>`}
         <div class="w-sub" id="sub-${w.id}"></div>
       </div>
       <div class="w-controls">
-        <button class="icon-btn" title="Edit graph" data-act="edit">✏️</button>
+        ${editControls}
         <button class="icon-btn" title="Export PNG" data-act="export">⬇️</button>
         <button class="icon-btn" title="Expand" data-act="maximize">⛶</button>
-        <button class="icon-btn danger" title="Remove" data-act="remove">✕</button>
+        ${removeControl}
       </div>
     </div>
     <div class="w-body" id="body-${w.id}"></div>
-    <div class="w-foot">
-      <button class="w-edit-link" data-act="edit">Edit graph</button>
-    </div>
+    ${footHtml}
   `;
 
-  // title rename
-  const titleInput = el.querySelector('.w-title');
-  titleInput.addEventListener('change', ()=>{ w.title=titleInput.value; saveState(); });
+  // title rename (only when editable)
+  const titleInput = el.querySelector('input.w-title');
+  if (titleInput) titleInput.addEventListener('change', ()=>{ w.title=titleInput.value; saveState(); });
 
   // action buttons
   el.querySelectorAll('[data-act]').forEach(b=>{
@@ -2720,22 +2743,30 @@ async function loadCurrentUser() {
     const { user } = await API.me();
     currentUser = user;
     const name = user.name || user.email;
+    const label = user.account_type === 'admin' ? 'admin' : user.permission;   // admin | editor | viewer
     $('#userName').textContent = name;
-    $('#userRole').textContent = user.role;
+    $('#userRole').textContent = label;
     $('#userAvatar').textContent = (name || '?').trim().charAt(0) || '?';
-    $('#userMenuBtn').title = `${name} · ${user.role}`;
-    applyRoleUI();
+    $('#userMenuBtn').title = `${name} · ${label}`;
+    applyAccountUI();
   } catch (e) {
     location.href = '/login';   // not authenticated
   }
 }
 
-/* Show the admin button only for admins. Per-dashboard edit rights are
-   handled separately by applyEditableUI (based on the open dashboard). */
-function applyRoleUI() {
-  const role = (currentUser && currentUser.role) || 'viewer';
-  document.body.dataset.role = role;
-  const adminBtn = $('#adminBtn'); if (adminBtn) adminBtn.style.display = role === 'admin' ? '' : 'none';
+/* Enforce account capabilities by REMOVING controls from the DOM (not just
+   hiding) so unauthorized controls never exist for that session. */
+function applyAccountUI() {
+  const admin = isAdmin();
+  const canEdit = isEditorAcct();
+  document.body.dataset.account = currentUser ? currentUser.account_type : 'user';
+  document.body.dataset.permission = (currentUser && currentUser.permission) || '';
+  if (!admin) $('#adminBtn')?.remove();
+  if (!canEdit) {
+    // Viewers: no creation / editing / data-source controls at all.
+    ['#newGraphBtn','#openConnectBtn','#shareBtn','#newDashBtn','#delDashBtn','#saveIndicator'].forEach(sel => $(sel)?.remove());
+    const t = $('#dashTitle'); if (t) t.readOnly = true;
+  }
 }
 
 /* =====================================================================
@@ -2868,61 +2899,81 @@ async function openAdmin() {
 }
 function closeAdmin() { $('#adminOverlay').classList.remove('open'); }
 
+function lastActiveLabel(ts) {
+  if (!ts) return 'never';
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
 async function renderAdminUsers() {
   const { users } = await API.adminUsers();
   adminUsersCache = users;
   const wrap = $('#adminUsers');
+  if (!users.length) { wrap.innerHTML = '<div class="bhint">No user accounts yet.</div>'; return; }
   wrap.innerHTML = users.map(u => `
-    <div class="admin-row clickable" data-uid="${u.id}">
+    <div class="admin-row" data-uid="${u.id}">
       <div class="au-info">
-        <div class="au-name">${escapeHtml(u.name || '(no name)')}${u.id === currentUser.id ? ' <span style="color:var(--text-dim);font-weight:400">(you)</span>' : ''}</div>
+        <div class="au-name" data-open="${u.id}" style="cursor:pointer">${escapeHtml(u.name || '(no name)')}</div>
         <div class="au-email">${escapeHtml(u.email)}</div>
       </div>
-      <span class="au-rolebadge">${escapeHtml(u.role)}</span>
-      <span class="au-chevron">›</span>
+      <span class="au-lastactive" title="Last active">${lastActiveLabel(u.last_active)}</span>
+      <select class="perm-select p-${u.permission}" data-perm-for="${u.id}">
+        <option value="viewer" ${u.permission === 'viewer' ? 'selected' : ''}>Viewer</option>
+        <option value="editor" ${u.permission === 'editor' ? 'selected' : ''}>Editor</option>
+      </select>
     </div>`).join('');
-  wrap.querySelectorAll('.admin-row[data-uid]').forEach(row => {
-    row.onclick = () => openUserPerms(adminUsersCache.find(u => u.id === +row.dataset.uid));
+  // click name → detail modal
+  wrap.querySelectorAll('[data-open]').forEach(el =>
+    el.onclick = () => openUserPerms(adminUsersCache.find(u => u.id === +el.dataset.open)));
+  // inline permission dropdown (with confirm on downgrade)
+  wrap.querySelectorAll('select[data-perm-for]').forEach(sel => {
+    let prev = sel.value;
+    sel.onchange = async () => {
+      const uid = +sel.dataset.permFor;
+      const u = adminUsersCache.find(x => x.id === uid);
+      if (prev === 'editor' && sel.value === 'viewer' &&
+          !confirm(`This will remove all edit access for ${u.name || u.email}. Continue?`)) { sel.value = prev; return; }
+      try { await API.adminSetPermission(uid, sel.value); if (u) u.permission = sel.value; prev = sel.value; sel.className = 'perm-select p-' + sel.value; toast('Permission updated'); }
+      catch (e) { toast('Failed: ' + e.message, true); sel.value = prev; }
+    };
   });
 }
 
-/* --- per-user permissions modal --- */
+/* --- per-user detail modal: permission + graph access --- */
 async function openUserPerms(user) {
   if (!user) return;
   upUser = user;
   $('#userPermOverlay').classList.add('open');
   $('#upTitle').textContent = `Permissions — ${user.name || user.email}`;
-  $('#upRole').value = user.role;
+  $('#upRole').value = user.permission;
   const wrap = $('#upWidgets');
   wrap.innerHTML = '<div class="bhint">Loading…</div>';
   try {
-    if (!adminWidgetsCache.length) adminWidgetsCache = (await API.adminWidgets()).widgets;
-    const { permissions } = await API.adminPermissions(user.id);
-    const permOf = {}; permissions.forEach(p => permOf[p.widget_id] = p.permission);
+    adminWidgetsCache = (await API.adminWidgets()).widgets;
+    const { widget_ids } = await API.adminPermissions(user.id);
+    const granted = new Set(widget_ids);
     if (!adminWidgetsCache.length) { wrap.innerHTML = '<div class="bhint">No graphs created yet.</div>'; return; }
-    wrap.innerHTML = adminWidgetsCache.map(w => {
-      const cur = permOf[w.widget_id] || 'none';
-      return `<div class="admin-wrow">
+    wrap.innerHTML = adminWidgetsCache.map(w => `
+      <div class="admin-wrow">
         <div><div class="aw-title">${escapeHtml(w.title)}</div><div class="aw-dash">${escapeHtml(w.dashboard_title)}</div></div>
-        <select class="perm-select p-${cur}" data-wid="${escapeHtml(w.widget_id)}">
-          <option value="none" ${cur==='none'?'selected':''}>No access</option>
-          <option value="view" ${cur==='view'?'selected':''}>View only</option>
-          <option value="edit" ${cur==='edit'?'selected':''}>Edit</option>
-        </select>
-      </div>`;
-    }).join('');
-    wrap.querySelectorAll('.perm-select').forEach(sel => {
-      sel.onchange = () => { sel.className = 'perm-select p-' + sel.value; };
-    });
+        <label class="admin-toggle">
+          <input type="checkbox" data-wid="${escapeHtml(w.widget_id)}" ${granted.has(w.widget_id) ? 'checked' : ''}>
+          <span class="track"></span>
+        </label>
+      </div>`).join('');
   } catch (e) { wrap.innerHTML = '<div class="bhint">Failed to load: ' + escapeHtml(e.message) + '</div>'; }
 }
 function closeUserPerms() { $('#userPermOverlay').classList.remove('open'); upUser = null; }
 async function saveUserPerms() {
   if (!upUser) return;
-  const grants = [...$$('#upWidgets .perm-select')].map(sel => ({ widget_id: sel.dataset.wid, permission: sel.value }));
-  const newRole = $('#upRole').value;
+  const newPerm = $('#upRole').value;
+  const grants = [...$$('#upWidgets input[data-wid]')].map(cb => ({ widget_id: cb.dataset.wid, granted: cb.checked }));
+  if (upUser.permission === 'editor' && newPerm === 'viewer' &&
+      !confirm(`This will remove all edit access for ${upUser.name || upUser.email}. Continue?`)) return;
   try {
-    if (newRole !== upUser.role) { await API.adminSetRole(upUser.id, newRole); upUser.role = newRole; }
+    if (newPerm !== upUser.permission) { await API.adminSetPermission(upUser.id, newPerm); upUser.permission = newPerm; }
     await API.adminSavePermissions(upUser.id, grants);
     toast('Permissions saved');
     closeUserPerms();

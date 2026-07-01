@@ -17,7 +17,7 @@ try { bcrypt = require('bcryptjs'); } catch { /* fall back to scrypt */ }
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const DB_FILE = path.join(ROOT, 'nexus.db');
-const ROLES = ['admin', 'editor', 'viewer'];
+const PERMISSIONS = ['viewer', 'editor'];
 const SESSION_TTL = 1000 * 60 * 60 * 24 * 7;   // 7 days
 
 /* =====================================================================
@@ -29,14 +29,29 @@ db.exec(`CREATE TABLE IF NOT EXISTS app_dashboards (
 )`);
 // Named app_users (not "users") to avoid colliding with a sample data
 // table that may already be named "users" in an existing database.
+// account_type: 'admin' | 'user'. permission: 'viewer' | 'editor' (NULL for admins).
 db.exec(`CREATE TABLE IF NOT EXISTS app_users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name TEXT,
-  role TEXT NOT NULL DEFAULT 'viewer' CHECK(role IN ('admin','editor','viewer')),
+  account_type TEXT NOT NULL DEFAULT 'user',
+  permission TEXT,
+  last_active INTEGER,
   created_at INTEGER NOT NULL
 )`);
+// Migrate the old single `role` column → account_type + permission.
+try {
+  const cols = db.prepare('PRAGMA table_info(app_users)').all().map(c => c.name);
+  if (!cols.includes('account_type')) db.exec("ALTER TABLE app_users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'user'");
+  if (!cols.includes('permission'))   db.exec('ALTER TABLE app_users ADD COLUMN permission TEXT');
+  if (!cols.includes('last_active'))  db.exec('ALTER TABLE app_users ADD COLUMN last_active INTEGER');
+  if (cols.includes('role')) {
+    db.exec("UPDATE app_users SET account_type='admin', permission=NULL WHERE role='admin'");
+    db.exec("UPDATE app_users SET account_type='user', permission='editor' WHERE role='editor'");
+    db.exec("UPDATE app_users SET account_type='user', permission='viewer' WHERE role='viewer'");
+  }
+} catch { /* fresh db already matches */ }
 db.exec(`CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL,
@@ -282,7 +297,9 @@ function getSessionUser(req) {
   const s = db.prepare('SELECT * FROM sessions WHERE token=?').get(token);
   if (!s) return null;
   if (s.expires_at < Date.now()) { db.prepare('DELETE FROM sessions WHERE token=?').run(token); return null; }
-  return db.prepare('SELECT id,email,name,role,created_at FROM app_users WHERE id=?').get(s.user_id) || null;
+  const u = db.prepare('SELECT id,email,name,account_type,permission,last_active,created_at FROM app_users WHERE id=?').get(s.user_id);
+  if (u) { const now = Date.now(); if (!u.last_active || now - u.last_active > 60000) db.prepare('UPDATE app_users SET last_active=? WHERE id=?').run(now, u.id); }
+  return u || null;
 }
 function destroySession(req) {
   const token = parseCookies(req).sid;
@@ -294,45 +311,47 @@ function setSessionCookie(res, token) {
 function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', 'sid=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
 }
-const publicUser = u => ({ id: u.id, email: u.email, name: u.name, role: u.role, created_at: u.created_at });
+const publicUser = u => ({ id: u.id, email: u.email, name: u.name, account_type: u.account_type, permission: u.permission, last_active: u.last_active, created_at: u.created_at });
 
 /* =====================================================================
-   Permissions — per-user, per-widget: 'none' | 'view' | 'edit'
+   Account model + reusable auth guards
+     account_type: 'admin' | 'user'
+     permission (users only): 'viewer' | 'editor'
    ===================================================================== */
-const PERMS = ['none', 'view', 'edit'];
-function userWidgetPerm(userId, widgetId) {
-  const r = db.prepare('SELECT permission FROM widget_permissions WHERE user_id=? AND widget_id=?').get(userId, widgetId);
-  return r ? r.permission : 'none';
+const isAdminAcct = u => !!u && u.account_type === 'admin';
+const canEditAcct = u => !!u && (u.account_type === 'admin' || u.permission === 'editor');
+// Guard middlewares: return true if allowed; otherwise send an opaque 403.
+function requireAdmin(u, res) { if (!isAdminAcct(u)) { sendJson(res, 403, { error: 'Forbidden' }); return false; } return true; }
+function requireEditorOrAdmin(u, res) { if (!canEditAcct(u)) { sendJson(res, 403, { error: 'Forbidden' }); return false; } return true; }
+
+/* =====================================================================
+   Graph-access grants — admin grants a user access to specific widgets.
+   Access is boolean (a row = granted); whether that access is view or edit
+   is decided by the account's permission (viewer→view, editor→edit).
+   ===================================================================== */
+function userGrantedWidgetIds(userId) {
+  return new Set(db.prepare('SELECT widget_id FROM widget_permissions WHERE user_id=?').all(userId).map(r => r.widget_id));
 }
-function userWidgetPermMap(userId) {
-  const map = {};
-  db.prepare('SELECT widget_id, permission FROM widget_permissions WHERE user_id=?').all(userId)
-    .forEach(r => { map[r.widget_id] = r.permission; });
-  return map;
-}
-// Returns a filtered copy of the dashboard state for `user`. Owners/admins see
-// everything (each widget tagged _perm:'edit'); everyone else sees only widgets
-// they were granted view/edit, tagged with their permission.
+// Filtered copy of dashboard state for `user`, each kept widget tagged _perm.
 function filterStateForUser(stateObj, user, ownerId) {
   if (!stateObj) return stateObj;
-  const full = user.id === ownerId || user.role === 'admin';
-  const perms = full ? null : userWidgetPermMap(user.id);
+  const full = user.id === ownerId || isAdminAcct(user);   // owners & admins see all, editable
+  const granted = full ? null : userGrantedWidgetIds(user.id);
+  const cap = user.permission === 'editor' ? 'edit' : 'view';   // capability on granted widgets
   (stateObj.views || []).forEach(v => {
     if (!Array.isArray(v.widgets)) return;
     v.widgets = v.widgets.filter(w => {
       if (full) { w._perm = 'edit'; return true; }
-      const p = perms[w.id] || 'none';
-      if (p === 'none') return false;
-      w._perm = p;
+      if (!granted.has(w.id)) return false;
+      w._perm = cap;
       return true;
     });
   });
   return stateObj;
 }
-// Does the user have any view/edit grant on a widget in this dashboard?
 function hasWidgetAccess(userId, stateObj) {
-  const perms = userWidgetPermMap(userId);
-  return (stateObj.views || []).some(v => (v.widgets || []).some(w => (perms[w.id] || 'none') !== 'none'));
+  const granted = userGrantedWidgetIds(userId);
+  return (stateObj.views || []).some(v => (v.widgets || []).some(w => granted.has(w.id)));
 }
 // Every widget across every dashboard (for the admin visibility panel).
 function collectAllWidgets() {
@@ -410,7 +429,7 @@ const server = http.createServer(async (req, res) => {
   try {
     /* ---------------- Auth API (public) ---------------- */
     if (p === '/api/auth/signup' && m === 'POST') {
-      const { email, password, name, role } = await readBody(req);
+      const { email, password, name } = await readBody(req);
       const mail = String(email || '').trim().toLowerCase();
       if (!mail || !password) return sendJson(res, 400, { error: 'Email and password are required' });
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) return sendJson(res, 400, { error: 'Enter a valid email' });
@@ -418,19 +437,16 @@ const server = http.createServer(async (req, res) => {
       if (db.prepare('SELECT id FROM app_users WHERE email=?').get(mail))
         return sendJson(res, 409, { error: 'An account with that email already exists' });
 
-      const userCount = db.prepare('SELECT COUNT(*) n FROM app_users').get().n;
-      const requester = getSessionUser(req);
-      // First-ever user bootstraps as admin. Otherwise an admin may assign a
-      // role when creating a user; everyone else defaults to viewer.
-      let finalRole = 'viewer';
-      if (userCount === 0) finalRole = 'admin';
-      else if (role && requester && requester.role === 'admin' && ROLES.includes(role)) finalRole = role;
-
-      const info = db.prepare('INSERT INTO app_users (email,password_hash,name,role,created_at) VALUES (?,?,?,?,?)')
-        .run(mail, hashPassword(String(password)), String(name || '').trim(), finalRole, Date.now());
-      const user = db.prepare('SELECT id,email,name,role,created_at FROM app_users WHERE id=?').get(Number(info.lastInsertRowid));
-      // Log in the new user only when this is a self-signup (not an admin creating others).
-      if (!requester) setSessionCookie(res, createSession(user.id));
+      // First-ever account is the admin (no permission). Everyone else is a
+      // regular user defaulting to viewer — an admin promotes them to editor.
+      const isFirst = db.prepare('SELECT COUNT(*) n FROM app_users').get().n === 0;
+      const account_type = isFirst ? 'admin' : 'user';
+      const permission = isFirst ? null : 'viewer';
+      const now = Date.now();
+      const info = db.prepare('INSERT INTO app_users (email,password_hash,name,account_type,permission,last_active,created_at) VALUES (?,?,?,?,?,?,?)')
+        .run(mail, hashPassword(String(password)), String(name || '').trim(), account_type, permission, now, now);
+      const user = db.prepare('SELECT id,email,name,account_type,permission,created_at FROM app_users WHERE id=?').get(Number(info.lastInsertRowid));
+      setSessionCookie(res, createSession(user.id));
       return sendJson(res, 200, { user });
     }
 
@@ -490,63 +506,60 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     }
 
-    /* ---------------- User directory (for sharing/grants) ---------------- */
+    /* ---------------- User directory (for sharing) ---------------- */
     if (p === '/api/users' && m === 'GET') {
-      const rows = db.prepare('SELECT id,name,email,role FROM app_users ORDER BY name, email').all();
+      const rows = db.prepare('SELECT id,name,email,account_type,permission FROM app_users ORDER BY name, email').all();
       return sendJson(res, 200, { users: rows });
     }
 
-    /* ---------------- Admin (admin-only) ---------------- */
+    /* ---------------- Admin (admin accounts only) ---------------- */
     if (p.startsWith('/api/admin/')) {
-      if (authUser.role !== 'admin') return sendJson(res, 403, { error: 'Admin only' });
+      if (!requireAdmin(authUser, res)) return;
 
+      // Only 'user' accounts are manageable here — admins never appear.
       if (p === '/api/admin/users' && m === 'GET')
-        return sendJson(res, 200, { users: db.prepare('SELECT id,email,name,role,created_at FROM app_users ORDER BY created_at').all() });
+        return sendJson(res, 200, { users: db.prepare("SELECT id,email,name,permission,last_active,created_at FROM app_users WHERE account_type='user' ORDER BY created_at").all() });
 
-      if (p.match(/^\/api\/admin\/users\/\d+\/role$/) && m === 'PUT') {
+      // Set a user's permission (viewer|editor). Admins cannot be edited here.
+      if (p.match(/^\/api\/admin\/users\/\d+\/permission$/) && m === 'PATCH') {
         const uid = Number(p.split('/')[4]);
-        const { role } = await readBody(req);
-        if (!ROLES.includes(role)) return sendJson(res, 400, { error: 'Invalid role' });
+        const { permission } = await readBody(req);
+        if (!PERMISSIONS.includes(permission)) return sendJson(res, 400, { error: 'Invalid permission' });
         const target = db.prepare('SELECT * FROM app_users WHERE id=?').get(uid);
-        if (!target) return sendJson(res, 404, { error: 'User not found' });
-        // never leave the system with zero admins
-        if (target.role === 'admin' && role !== 'admin') {
-          const admins = db.prepare("SELECT COUNT(*) n FROM app_users WHERE role='admin'").get().n;
-          if (admins <= 1) return sendJson(res, 400, { error: 'Cannot demote the last admin' });
-        }
-        db.prepare('UPDATE app_users SET role=? WHERE id=?').run(role, uid);
+        if (!target || target.account_type !== 'user') return sendJson(res, 404, { error: 'User not found' });
+        db.prepare('UPDATE app_users SET permission=? WHERE id=?').run(permission, uid);
         return sendJson(res, 200, { ok: true });
       }
 
       if (p === '/api/admin/widgets' && m === 'GET')
         return sendJson(res, 200, { widgets: collectAllWidgets() });
 
+      // Which widgets a user is granted access to.
       if (p === '/api/admin/permissions' && m === 'GET') {
         const uid = Number(url.searchParams.get('user_id'));
-        const rows = db.prepare('SELECT widget_id,permission FROM widget_permissions WHERE user_id=?').all(uid);
-        return sendJson(res, 200, { permissions: rows });
+        const ids = db.prepare('SELECT widget_id FROM widget_permissions WHERE user_id=?').all(uid).map(r => r.widget_id);
+        return sendJson(res, 200, { widget_ids: ids });
       }
 
-      // Bulk save all per-widget grants for a user (used by the per-user modal).
+      // Bulk-save a user's graph access (granted true/false per widget).
       if (p === '/api/admin/permissions' && m === 'POST') {
         const { user_id, grants } = await readBody(req);
         if (!user_id || !Array.isArray(grants)) return sendJson(res, 400, { error: 'user_id and grants[] required' });
-        const upsert = db.prepare(`INSERT INTO widget_permissions (widget_id,user_id,can_view,permission) VALUES (?,?,?,?)
-                    ON CONFLICT(widget_id,user_id) DO UPDATE SET can_view=excluded.can_view, permission=excluded.permission`);
+        const ins = db.prepare(`INSERT INTO widget_permissions (widget_id,user_id,can_view,permission) VALUES (?,?,1,'view')
+                    ON CONFLICT(widget_id,user_id) DO NOTHING`);
         const del = db.prepare('DELETE FROM widget_permissions WHERE widget_id=? AND user_id=?');
         db.exec('BEGIN');
         try {
           for (const g of grants) {
-            const perm = PERMS.includes(g.permission) ? g.permission : 'none';
-            if (perm === 'none') del.run(g.widget_id, Number(user_id));
-            else upsert.run(g.widget_id, Number(user_id), perm === 'none' ? 0 : 1, perm);
+            if (g.granted) ins.run(g.widget_id, Number(user_id));
+            else del.run(g.widget_id, Number(user_id));
           }
           db.exec('COMMIT');
         } catch (e) { db.exec('ROLLBACK'); throw e; }
         return sendJson(res, 200, { ok: true });
       }
 
-      return sendJson(res, 404, { error: 'Unknown admin endpoint' });
+      return sendJson(res, 404, { error: 'Forbidden' });
     }
 
     /* ---------------- Saved DB connections (multi-connection) ---------------- */
@@ -555,7 +568,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { connections: rows.map(publicConn) });   // never includes password
     }
     if (p === '/api/connections' && m === 'POST') {
-      // every signed-in user manages their own connections
+      if (!requireEditorOrAdmin(authUser, res)) return;   // viewers cannot add connections
       const b = await readBody(req);
       if (!b.host || !b.database) return sendJson(res, 400, { error: 'host and database are required' });
       const id = 'conn_' + crypto.randomBytes(6).toString('hex');
@@ -571,7 +584,7 @@ const server = http.createServer(async (req, res) => {
       const action = parts[4] || '';
       const row = db.prepare('SELECT * FROM connections WHERE id=?').get(cid);
       if (!row) return sendJson(res, 404, { error: 'Connection not found' });
-      if (row.user_id !== authUser.id && authUser.role !== 'admin') return sendJson(res, 403, { error: 'Forbidden' });
+      if (row.user_id !== authUser.id && !isAdminAcct(authUser)) return sendJson(res, 403, { error: 'Forbidden' });
 
       if (!action && m === 'DELETE') {
         const pool = livePools.get(cid); if (pool) { await pool.end().catch(() => {}); livePools.delete(cid); }
@@ -579,6 +592,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true });
       }
       if (action === 'connect' && m === 'POST') {
+        if (!requireEditorOrAdmin(authUser, res)) return;   // viewers cannot open connections
         const Pool = getPg();
         if (!Pool) return sendJson(res, 500, { error: 'Postgres support not installed (npm install pg)' });
         const pool = new Pool({ connectionString: connectionString(row), connectionTimeoutMillis: 8000 });
@@ -593,6 +607,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       if (action === 'disconnect' && m === 'POST') {
+        if (!requireEditorOrAdmin(authUser, res)) return;   // viewers cannot disconnect
         const pool = livePools.get(cid); if (pool) { await pool.end().catch(() => {}); livePools.delete(cid); }
         return sendJson(res, 200, { status: 'disconnected' });
       }
@@ -626,20 +641,25 @@ const server = http.createServer(async (req, res) => {
         - admin has full control over everything (sees/edits/deletes all, can
           change any dashboard's visibility).
     */
-    const isAdminUser = authUser && authUser.role === 'admin';
+    const isAdminUser = isAdminAcct(authUser);
     if (p === '/api/dashboards' && m === 'GET') {
-      // Own dashboards + any shared-with-everyone + any granted to me (admins: all).
-      const rows = isAdminUser
-        ? db.prepare('SELECT id,title,owner_id,visibility,share_token,updated_at FROM dashboards ORDER BY updated_at DESC').all()
-        : db.prepare(`SELECT id,title,owner_id,visibility,share_token,updated_at FROM dashboards
-                      WHERE owner_id=? OR visibility='shared'
-                         OR id IN (SELECT dashboard_id FROM dashboard_grants WHERE user_id=?)
-                      ORDER BY updated_at DESC`).all(authUser.id, authUser.id);
+      let rows;
+      if (isAdminUser) {
+        rows = db.prepare('SELECT id,title,owner_id,visibility,share_token,updated_at FROM dashboards ORDER BY updated_at DESC').all();
+      } else {
+        // own + shared + dashboard-granted + any dashboard containing a widget granted to me
+        const granted = userGrantedWidgetIds(authUser.id);
+        rows = db.prepare('SELECT id,title,owner_id,visibility,share_token,state_json,updated_at FROM dashboards ORDER BY updated_at DESC').all()
+          .filter(r => r.owner_id === authUser.id || r.visibility === 'shared'
+            || db.prepare('SELECT 1 FROM dashboard_grants WHERE dashboard_id=? AND user_id=?').get(r.id, authUser.id)
+            || (granted.size && (safeParse(r.state_json).views || []).some(v => (v.widgets || []).some(w => granted.has(w.id)))))
+          .map(({ state_json, ...r }) => r);
+      }
       return sendJson(res, 200, { dashboards: rows.map(r => ({ ...r, mine: r.owner_id === authUser.id })) });
     }
 
     if (p === '/api/dashboards' && m === 'POST') {
-      // Anyone signed in can create their OWN dashboard (they fully own it).
+      if (!requireEditorOrAdmin(authUser, res)) return;   // viewers cannot create dashboards
       const d = await readBody(req);
       const id = 'dash_' + crypto.randomBytes(6).toString('hex');
       const now = Date.now();
@@ -669,7 +689,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { id: row.id, title: row.title, state: stateObj, owner_id: row.owner_id, visibility: row.visibility, share_token: (isOwner || isAdminUser) ? row.share_token : undefined, canEdit: mayEdit, updated_at: row.updated_at });
       }
       if (!action && m === 'PUT') {
-        if (!mayEdit) return sendJson(res, 403, { error: 'You do not have permission to edit this dashboard' });
+        if (!mayEdit || !canEditAcct(authUser)) return sendJson(res, 403, { error: 'Forbidden' });
         const d = await readBody(req);
         const title = d.title !== undefined ? String(d.title) : row.title;
         const stateJson = d.state !== undefined ? JSON.stringify(d.state) : row.state_json;
@@ -718,8 +738,9 @@ const server = http.createServer(async (req, res) => {
       /* --- single-widget edit/delete: owner/admin OR a user granted 'edit' --- */
       if (action === 'widgets') {
         const wid = decodeURIComponent(parts[5] || '');
-        const canEditWidget = mayEdit || userWidgetPerm(authUser.id, wid) === 'edit';
-        if (!canEditWidget) return sendJson(res, 403, { error: 'You do not have edit access to this widget' });
+        // owner/admin, or an editor who was granted access to this widget
+        const canEditWidget = mayEdit || (canEditAcct(authUser) && userGrantedWidgetIds(authUser.id).has(wid));
+        if (!canEditWidget) return sendJson(res, 403, { error: 'Forbidden' });
         const state = safeParse(row.state_json);
         let found = null, ownerView = null;
         for (const v of (state.views || [])) { const w = (v.widgets || []).find(x => x.id === wid); if (w) { found = w; ownerView = v; break; } }
