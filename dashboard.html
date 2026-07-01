@@ -181,6 +181,15 @@ button { font-family: inherit; cursor: pointer; }
 /* ===== Admin panel ===== */
 .admin-users { display: flex; flex-direction: column; gap: 8px; }
 .admin-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+.admin-row.clickable { cursor: pointer; transition: border-color .15s, background .15s; }
+.admin-row.clickable:hover { border-color: var(--accent); background: var(--panel-2); }
+.admin-row .au-rolebadge { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; color: var(--accent); background: rgba(124,92,252,0.12); padding: 3px 9px; border-radius: 999px; }
+.admin-row .au-chevron { color: var(--text-dim); font-size: 16px; }
+.up-role-row { display: flex; align-items: center; gap: 12px; }
+.perm-select { background: var(--panel-2); color: var(--text); border: 1.5px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12px; font-family: inherit; outline: none; }
+.perm-select:focus { border-color: var(--accent); }
+.perm-select.p-none { color: var(--text-dim); }
+.perm-select.p-edit { border-color: var(--accent-2); color: var(--accent-2); }
 .admin-row .au-info { flex: 1; min-width: 0; }
 .admin-row .au-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
 .admin-row .au-email { font-size: 11.5px; color: var(--text-dim); }
@@ -197,19 +206,25 @@ button { font-family: inherit; cursor: pointer; }
 .admin-toggle input:checked + .track { background: var(--accent-2); }
 .admin-toggle input:checked + .track::before { transform: translateX(18px); }
 
-/* ===== Read-only mode — hide editing affordances for the CURRENT dashboard
-   (a dashboard you don't own, a granted/shared one, or a public /view link).
-   You can still create your own dashboards, so #newDashBtn stays visible. ===== */
+/* ===== Read-only mode — hide DASHBOARD-level editing affordances when you
+   can't edit the current dashboard. Per-widget edit controls are handled
+   separately by the .w-readonly class so a widget you were granted 'edit' on
+   still shows its controls even on a dashboard you don't own. ===== */
 body[data-readonly="true"] #newGraphBtn,
 body[data-readonly="true"] #delDashBtn,
 body[data-readonly="true"] #shareBtn,
 body[data-readonly="true"] #saveIndicator,
-body[data-readonly="true"] .w-controls,
-body[data-readonly="true"] .w-foot,
 body[data-readonly="true"] .add-card-fab,
 body[data-readonly="true"] #viewTabs > button.btn,
 body[data-readonly="true"] .view-tab .x,
 body[data-readonly="true"] .empty-canvas .btn { display: none !important; }
+/* Per-widget read-only: hide edit + delete + Edit-graph, keep export/expand */
+.widget.w-readonly .icon-btn[data-act="edit"],
+.widget.w-readonly .icon-btn[data-act="remove"],
+.widget.w-readonly .w-foot { display: none !important; }
+/* Public share-link view is fully read-only on every widget */
+body[data-viewmode="link"] .w-controls,
+body[data-viewmode="link"] .w-foot { display: none !important; }
 /* Public share-link view: also hide the whole app chrome (picker, connect, etc.) */
 body[data-viewmode="link"] #dashPicker,
 body[data-viewmode="link"] #newDashBtn,
@@ -1023,19 +1038,38 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 
 <!-- ===== Admin panel modal ===== -->
 <div class="modal-overlay" id="adminOverlay">
-  <div class="builder" role="dialog" aria-modal="true" style="width:min(760px,96vw)">
+  <div class="builder" role="dialog" aria-modal="true" style="width:min(640px,96vw)">
     <div class="builder-head">
-      <h2>Admin panel</h2>
+      <h2>Admin — users</h2>
       <button class="icon-btn" id="adminClose" title="Close">Close</button>
     </div>
-
-    <div class="bfield-label" style="margin-bottom:8px">Users &amp; roles</div>
+    <div class="bhint" style="margin-bottom:12px">Click a user to manage their role and per-graph permissions.</div>
     <div id="adminUsers" class="admin-users"></div>
+  </div>
+</div>
 
-    <div class="bfield-label" style="margin:22px 0 8px">Per-user widget visibility</div>
-    <div class="bhint" style="margin-bottom:10px">Pick a user, then toggle which graphs they're allowed to see. Off = hidden from that user.</div>
-    <select class="binput" id="adminPermUser" style="width:100%;margin-bottom:10px"></select>
-    <div id="adminWidgets" class="admin-widgets"></div>
+<!-- ===== Per-user permissions modal ===== -->
+<div class="modal-overlay" id="userPermOverlay">
+  <div class="builder" role="dialog" aria-modal="true" style="width:min(680px,96vw)">
+    <div class="builder-head">
+      <h2 id="upTitle">User permissions</h2>
+      <button class="icon-btn" id="userPermClose" title="Close">Close</button>
+    </div>
+    <div class="up-role-row">
+      <label class="bfield-label" for="upRole">Role</label>
+      <select class="binput" id="upRole" style="max-width:180px">
+        <option value="viewer">viewer</option>
+        <option value="editor">editor</option>
+        <option value="admin">admin</option>
+      </select>
+    </div>
+    <div class="bfield-label" style="margin:18px 0 8px">Per-graph access</div>
+    <div class="bhint" style="margin-bottom:10px">No access = hidden · View only = can see · Edit = can see &amp; edit.</div>
+    <div id="upWidgets" class="admin-widgets"></div>
+    <div class="builder-actions" style="margin-top:18px">
+      <button class="btn" id="userPermCancel">Cancel</button>
+      <button class="btn primary" id="userPermSave">Save permissions</button>
+    </div>
   </div>
 </div>
 
@@ -1062,6 +1096,9 @@ let viewMode = null;          // 'link' when viewing a public /view/<token> shar
 const isAdmin  = () => currentUser && currentUser.role === 'admin';
 function requireEdit() { if (!canEditCurrent) { toast('This dashboard is read-only', true); return false; } return true; }
 function applyEditableUI() { document.body.dataset.readonly = canEditCurrent ? 'false' : 'true'; }
+// A widget is editable if you can edit the whole dashboard (owner/admin) OR
+// you were granted 'edit' on that specific widget.
+function widgetEditable(w) { return canEditCurrent || (w && w._perm === 'edit'); }
 const API = {
   async _fetch(path, opts) {
     const r = await fetch(API_BASE + path, Object.assign({ headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' }, opts));
@@ -1077,7 +1114,9 @@ const API = {
   adminSetRole(id, role) { return this._fetch('/api/admin/users/' + id + '/role', { method: 'PUT', body: JSON.stringify({ role }) }); },
   adminWidgets() { return this._fetch('/api/admin/widgets'); },
   adminPermissions(userId) { return this._fetch('/api/admin/permissions?user_id=' + userId); },
-  adminSetPermission(user_id, widget_id, can_view) { return this._fetch('/api/admin/permissions', { method: 'POST', body: JSON.stringify({ user_id, widget_id, can_view }) }); },
+  adminSavePermissions(user_id, grants) { return this._fetch('/api/admin/permissions', { method: 'POST', body: JSON.stringify({ user_id, grants }) }); },
+  updateWidget(dashId, wid, widget) { return this._fetch('/api/dashboards/' + dashId + '/widgets/' + wid, { method: 'PUT', body: JSON.stringify({ widget }) }); },
+  removeWidgetApi(dashId, wid) { return this._fetch('/api/dashboards/' + dashId + '/widgets/' + wid, { method: 'DELETE' }); },
   health() { return this._fetch('/api/health'); },
   query(sql) { return this._fetch('/api/query', { method: 'POST', body: JSON.stringify({ sql }) }); },
   tables() { return this._fetch('/api/tables'); },
@@ -1568,7 +1607,7 @@ let _widgetIdx = 0;
 function buildWidget(w, idx) {
   const el = document.createElement('div');
   const pastelClass = `widget-pastel-${idx % 8}`;
-  el.className = `widget size-${w.size} ${pastelClass}` + (w.minimized ? ' minimized' : '');
+  el.className = `widget size-${w.size} ${pastelClass}` + (w.minimized ? ' minimized' : '') + (widgetEditable(w) ? '' : ' w-readonly');
   el.dataset.id = w.id;
   el.draggable = false;
 
@@ -2267,7 +2306,10 @@ function bdCatCols()     { return (builderDataset || dataset).columns.filter(c =
 function activeBuilderDataset() { return builderDataset || (dataset.rows.length ? dataset : null); }
 
 function openBuilder(existing, presetType) {
-  if (!requireEdit()) return;
+  // Editing an existing widget needs edit rights on THAT widget; creating a
+  // new one needs edit rights on the dashboard (owner/admin).
+  if (existing) { if (!widgetEditable(existing)) { toast('You do not have edit access to this graph', true); return; } }
+  else if (!requireEdit()) return;
   const ds = dataset.rows.length ? dataset : null;
   builderTarget = existing ? existing.id : null;
   // If widget has its own saved dataset, restore it
@@ -2408,8 +2450,20 @@ function saveBuilder() {
   }
   if (builderTarget) {
     const w = widgets().find(x => x.id === builderTarget);
+    const perm = w && w._perm;
     if (w) Object.assign(w, d);
-    closeBuilder(); renderGrid(); saveState();
+    if (w) w._perm = perm;                    // preserve the per-widget permission tag
+    // If you don't own the dashboard but were granted 'edit' on this widget,
+    // save just this widget via the per-widget endpoint (full PUT would 403).
+    if (!canEditCurrent) {
+      const payload = { ...d }; delete payload._perm;
+      API.updateWidget(state.id, builderTarget, payload)
+        .then(() => toast('Graph updated'))
+        .catch(e => toast('Save failed: ' + e.message, true));
+      closeBuilder(); renderGrid();
+    } else {
+      closeBuilder(); renderGrid(); saveState();
+    }
   } else {
     widgets().push(d);
     closeBuilder(); renderGrid(); saveState();
@@ -2471,10 +2525,16 @@ function openDataPanel() {
 }
 window.openDataPanel = openDataPanel;
 function removeWidget(id) {
-  if (!requireEdit()) return;
   const ws = widgets();
   const i = ws.findIndex(w=>w.id===id);
-  if (i>=0){ ws.splice(i,1); if(charts[id]){try{charts[id].destroy()}catch(e){}delete charts[id];} renderGrid(); saveState(); }
+  if (i < 0) return;
+  if (!widgetEditable(ws[i])) { toast('You do not have edit access to this graph', true); return; }
+  const wasGrant = !canEditCurrent;               // non-owner deleting a widget they can edit
+  ws.splice(i,1);
+  if (charts[id]) { try{charts[id].destroy()}catch(e){} delete charts[id]; }
+  renderGrid();
+  if (wasGrant) API.removeWidgetApi(state.id, id).catch(e => toast('Delete failed: ' + e.message, true));
+  else saveState();
 }
 
 /* =====================================================================
@@ -2797,13 +2857,13 @@ async function renderShareGrants() {
 }
 
 /* =====================================================================
-   Admin panel — manage roles + per-user widget visibility (admin only)
+   Admin panel — click a user to manage role + per-widget permissions
    ===================================================================== */
-let adminUsersCache = [], adminWidgetsCache = [];
+let adminUsersCache = [], adminWidgetsCache = [], upUser = null;
 async function openAdmin() {
   if (!isAdmin()) return;
   $('#adminOverlay').classList.add('open');
-  try { await renderAdminUsers(); await renderAdminWidgets(); }
+  try { await renderAdminUsers(); }
   catch (e) { toast('Admin load failed: ' + e.message, true); }
 }
 function closeAdmin() { $('#adminOverlay').classList.remove('open'); }
@@ -2813,64 +2873,61 @@ async function renderAdminUsers() {
   adminUsersCache = users;
   const wrap = $('#adminUsers');
   wrap.innerHTML = users.map(u => `
-    <div class="admin-row">
+    <div class="admin-row clickable" data-uid="${u.id}">
       <div class="au-info">
         <div class="au-name">${escapeHtml(u.name || '(no name)')}${u.id === currentUser.id ? ' <span style="color:var(--text-dim);font-weight:400">(you)</span>' : ''}</div>
         <div class="au-email">${escapeHtml(u.email)}</div>
       </div>
-      <select data-role-for="${u.id}">
-        ${['admin','editor','viewer'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}
-      </select>
+      <span class="au-rolebadge">${escapeHtml(u.role)}</span>
+      <span class="au-chevron">›</span>
     </div>`).join('');
-  wrap.querySelectorAll('select[data-role-for]').forEach(sel => {
-    sel.onchange = async () => {
-      const uid = +sel.dataset.roleFor;
-      try {
-        await API.adminSetRole(uid, sel.value);
-        const u = adminUsersCache.find(x => x.id === uid); if (u) u.role = sel.value;
-        populateAdminPermUser();
-        toast('Role updated');
-      } catch (e) { toast('Failed: ' + e.message, true); renderAdminUsers(); }
-    };
+  wrap.querySelectorAll('.admin-row[data-uid]').forEach(row => {
+    row.onclick = () => openUserPerms(adminUsersCache.find(u => u.id === +row.dataset.uid));
   });
-  populateAdminPermUser();
 }
 
-function populateAdminPermUser() {
-  const sel = $('#adminPermUser'); if (!sel) return;
-  const prev = sel.value;
-  sel.innerHTML = adminUsersCache.map(u => `<option value="${u.id}">${escapeHtml(u.name || u.email)} — ${u.role}</option>`).join('');
-  if (prev && adminUsersCache.some(u => String(u.id) === prev)) sel.value = prev;
+/* --- per-user permissions modal --- */
+async function openUserPerms(user) {
+  if (!user) return;
+  upUser = user;
+  $('#userPermOverlay').classList.add('open');
+  $('#upTitle').textContent = `Permissions — ${user.name || user.email}`;
+  $('#upRole').value = user.role;
+  const wrap = $('#upWidgets');
+  wrap.innerHTML = '<div class="bhint">Loading…</div>';
+  try {
+    if (!adminWidgetsCache.length) adminWidgetsCache = (await API.adminWidgets()).widgets;
+    const { permissions } = await API.adminPermissions(user.id);
+    const permOf = {}; permissions.forEach(p => permOf[p.widget_id] = p.permission);
+    if (!adminWidgetsCache.length) { wrap.innerHTML = '<div class="bhint">No graphs created yet.</div>'; return; }
+    wrap.innerHTML = adminWidgetsCache.map(w => {
+      const cur = permOf[w.widget_id] || 'none';
+      return `<div class="admin-wrow">
+        <div><div class="aw-title">${escapeHtml(w.title)}</div><div class="aw-dash">${escapeHtml(w.dashboard_title)}</div></div>
+        <select class="perm-select p-${cur}" data-wid="${escapeHtml(w.widget_id)}">
+          <option value="none" ${cur==='none'?'selected':''}>No access</option>
+          <option value="view" ${cur==='view'?'selected':''}>View only</option>
+          <option value="edit" ${cur==='edit'?'selected':''}>Edit</option>
+        </select>
+      </div>`;
+    }).join('');
+    wrap.querySelectorAll('.perm-select').forEach(sel => {
+      sel.onchange = () => { sel.className = 'perm-select p-' + sel.value; };
+    });
+  } catch (e) { wrap.innerHTML = '<div class="bhint">Failed to load: ' + escapeHtml(e.message) + '</div>'; }
 }
-
-async function renderAdminWidgets() {
-  const { widgets } = await API.adminWidgets();
-  adminWidgetsCache = widgets;
-  $('#adminPermUser').onchange = refreshAdminWidgetToggles;
-  await refreshAdminWidgetToggles();
-}
-
-async function refreshAdminWidgetToggles() {
-  const uid = +$('#adminPermUser').value;
-  const wrap = $('#adminWidgets');
-  if (!uid) { wrap.innerHTML = '<div class="bhint">No users.</div>'; return; }
-  if (!adminWidgetsCache.length) { wrap.innerHTML = '<div class="bhint">No graphs created yet.</div>'; return; }
-  const { permissions } = await API.adminPermissions(uid);
-  const denied = new Set(permissions.filter(p => !p.can_view).map(p => p.widget_id));
-  wrap.innerHTML = adminWidgetsCache.map(w => `
-    <div class="admin-wrow">
-      <div><div class="aw-title">${escapeHtml(w.title)}</div><div class="aw-dash">${escapeHtml(w.dashboard_title)}</div></div>
-      <label class="admin-toggle">
-        <input type="checkbox" data-wid="${escapeHtml(w.widget_id)}" ${denied.has(w.widget_id) ? '' : 'checked'}>
-        <span class="track"></span>
-      </label>
-    </div>`).join('');
-  wrap.querySelectorAll('input[data-wid]').forEach(cb => {
-    cb.onchange = async () => {
-      try { await API.adminSetPermission(uid, cb.dataset.wid, cb.checked); }
-      catch (e) { toast('Failed: ' + e.message, true); cb.checked = !cb.checked; }
-    };
-  });
+function closeUserPerms() { $('#userPermOverlay').classList.remove('open'); upUser = null; }
+async function saveUserPerms() {
+  if (!upUser) return;
+  const grants = [...$$('#upWidgets .perm-select')].map(sel => ({ widget_id: sel.dataset.wid, permission: sel.value }));
+  const newRole = $('#upRole').value;
+  try {
+    if (newRole !== upUser.role) { await API.adminSetRole(upUser.id, newRole); upUser.role = newRole; }
+    await API.adminSavePermissions(upUser.id, grants);
+    toast('Permissions saved');
+    closeUserPerms();
+    renderAdminUsers();
+  } catch (e) { toast('Save failed: ' + e.message, true); }
 }
 
 /* Public read-only view of a shared dashboard (/view/<token>) — no login. */
@@ -2960,6 +3017,10 @@ function init() {
   $('#adminBtn').onclick = openAdmin;
   $('#adminClose').onclick = closeAdmin;
   $('#adminOverlay').addEventListener('click', e=>{ if (e.target.id==='adminOverlay') closeAdmin(); });
+  $('#userPermClose').onclick = closeUserPerms;
+  $('#userPermCancel').onclick = closeUserPerms;
+  $('#userPermSave').onclick = saveUserPerms;
+  $('#userPermOverlay').addEventListener('click', e=>{ if (e.target.id==='userPermOverlay') closeUserPerms(); });
   // Share modal
   $('#shareBtn').onclick = openShare;
   $('#shareClose').onclick = closeShare;
