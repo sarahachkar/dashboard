@@ -368,7 +368,9 @@ td.hl, th.hl { background: rgba(247,184,79,.18) !important; color: var(--warn) !
 select.input { cursor: pointer; }
 .searchbox { position: relative; flex: 1; min-width: 180px; }
 .searchbox .input { width: 100%; padding-left: 32px; }
-.searchbox::before { content: "🔍"; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; opacity: .6; }
+/* icon centered on the INPUT only (wrapper excludes the label above) */
+.search-input-wrap { position: relative; }
+.search-input-wrap::before { content: "🔍"; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; opacity: .6; pointer-events: none; line-height: 1; }
 
 /* ===== Dashboard grid ===== */
 /* ===== Card grid (Issue 1 + 8) ===== */
@@ -829,7 +831,9 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       </div>
       <div class="field searchbox" style="flex:1">
         <label>Global Search / Highlight</label>
-        <input class="input" id="globalSearch" placeholder="Highlight matching values across data…">
+        <div class="search-input-wrap">
+          <input class="input" id="globalSearch" placeholder="Highlight matching values across data…">
+        </div>
       </div>
       <div class="field">
         <label>&nbsp;</label>
@@ -1582,19 +1586,13 @@ function buildWidget(w, idx) {
       <div class="w-controls">
         <button class="icon-btn" title="Edit graph" data-act="edit">✏️</button>
         <button class="icon-btn" title="Export PNG" data-act="export">⬇️</button>
-        <button class="icon-btn" title="${w.minimized?'Expand':'Minimize'}" data-act="minimize">${w.minimized?'▲':'▼'}</button>
-        <button class="icon-btn" title="Maximize" data-act="maximize">⛶</button>
+        <button class="icon-btn" title="Expand" data-act="maximize">⛶</button>
         <button class="icon-btn danger" title="Remove" data-act="remove">✕</button>
       </div>
     </div>
     <div class="w-body" id="body-${w.id}"></div>
     <div class="w-foot">
       <button class="w-edit-link" data-act="edit">Edit graph</button>
-      <div class="size-pills" title="Resize card">
-        <button data-size="small"  class="${w.size==='small'?'active':''}">S</button>
-        <button data-size="medium" class="${w.size==='medium'?'active':''}">M</button>
-        <button data-size="large"  class="${w.size==='large'?'active':''}">L</button>
-      </div>
     </div>
   `;
 
@@ -1611,16 +1609,6 @@ function buildWidget(w, idx) {
       else if (act==='edit') openBuilder(w);
       else if (act==='minimize') toggleMinimize(w, el, b);
       else if (act==='maximize') toggleMaximize(w, el, b);
-    });
-  });
-
-  // S/M/L size pills
-  el.querySelectorAll('[data-size]').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      w.size = b.dataset.size;
-      el.className = `widget size-${w.size}`;
-      el.querySelectorAll('[data-size]').forEach(x=>x.classList.toggle('active', x.dataset.size===w.size));
-      renderWidgetBody(w); saveState();
     });
   });
 
@@ -1658,7 +1646,8 @@ function toggleMinimize(w, el, btn) {
 }
 function toggleMaximize(w, el, btn) {
   if (el.classList.contains('maximized')) { restoreMaximize(); return; }
-  if (w.minimized) toggleMinimize(w, el, el.querySelector('[data-act="minimize"]'));
+  // if the card was collapsed, restore it first (minimize control may be absent)
+  if (w.minimized) { const mb = el.querySelector('[data-act="minimize"]'); if (mb) toggleMinimize(w, el, mb); else { w.minimized = false; el.classList.remove('minimized'); } }
   let bd = document.querySelector('.maximize-backdrop');
   if (!bd) { bd = document.createElement('div'); bd.className = 'maximize-backdrop'; bd.onclick = restoreMaximize; document.body.appendChild(bd); }
   requestAnimationFrame(()=>bd.classList.add('show'));
@@ -1672,7 +1661,7 @@ function restoreMaximize() {
   if (el) {
     el.classList.remove('maximized');
     const b = el.querySelector('[data-act="maximize"]');
-    if (b) { b.textContent = '⛶'; b.title = 'Maximize'; }
+    if (b) { b.textContent = '⛶'; b.title = 'Expand'; }
     const id = el.dataset.id;
     setTimeout(()=>{ if (charts[id]) { try{charts[id].resize()}catch(e){} } }, 60);
   }
