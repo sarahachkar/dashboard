@@ -88,6 +88,9 @@ button { font-family: inherit; cursor: pointer; }
 }
 .dash-title:hover { -webkit-text-fill-color: transparent; }
 .dash-title:focus { -webkit-text-fill-color: var(--text); background: var(--panel-2); background-clip: unset; -webkit-background-clip: unset; border: 1px solid var(--accent); }
+/* read-only dashboard name — not editable, don't look like an input */
+.dash-title[readonly] { cursor: default; }
+.dash-title[readonly]:focus { -webkit-text-fill-color: transparent; background: transparent; border: 1px solid transparent; }
 .toolbar .spacer { flex: 1; }
 .btn {
   background: rgba(255,255,255,0.05); color: var(--text); border: 1px solid rgba(255,255,255,0.12);
@@ -796,7 +799,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <!-- Left group: brand + dashboard name/picker -->
   <div class="tb-group tb-left">
     <div class="tb-logo">N</div>
-    <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false">
+    <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" readonly title="Dashboard name (read-only)">
     <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
     <button class="btn ghost sm icon-only" id="newDashBtn" title="New dashboard">＋</button>
     <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard">🗑</button>
@@ -1540,7 +1543,7 @@ async function openDashboard(id) {
   canEditCurrent = d.canEdit !== false;   // server-computed: owner or admin
   applyState(d.state);
   $('#dashTitle').value = state.title;
-  $('#dashTitle').readOnly = !canEditCurrent;
+  $('#dashTitle').readOnly = true;   // dashboard name is not editable
   applyEditableUI();
   renderDashboardPicker();
   renderAll();
