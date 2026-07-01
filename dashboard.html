@@ -142,6 +142,22 @@ button { font-family: inherit; cursor: pointer; }
 .tb-secondary { display: flex; align-items: center; gap: 8px; }
 .tb-overflow-btn { display: none; font-size: 16px; }
 
+/* Notifications bell + dropdown */
+.notif-menu { position: relative; flex: none; }
+.notif-btn { position: relative; width: 34px; height: 34px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.08); font-size: 16px; cursor: pointer; display: grid; place-items: center; }
+.notif-btn:hover { border-color: var(--accent); background: rgba(124,92,252,0.18); }
+.notif-badge { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; line-height: 1; }
+.notif-dropdown { position: absolute; right: 0; top: calc(100% + 8px); width: 300px; max-width: 88vw; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: none; z-index: 60; overflow: hidden; }
+.notif-dropdown.open { display: block; }
+.nd-head { padding: 11px 14px; font-size: 12px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+.nd-list { max-height: 320px; overflow-y: auto; }
+.nd-item { padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text); cursor: pointer; transition: background .12s; }
+.nd-item:last-child { border-bottom: none; }
+.nd-item:hover { background: var(--panel-2); }
+.nd-item.unread { background: rgba(124,92,252,0.06); }
+.nd-item .nd-time { display: block; margin-top: 3px; font-size: 11px; color: var(--text-dim); }
+.nd-empty { padding: 20px 14px; text-align: center; color: var(--text-dim); font-size: 12.5px; }
+
 /* User menu (avatar → dropdown) */
 .user-menu { position: relative; flex: none; }
 .user-avatar-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-weight: 700; font-size: 14px; text-transform: uppercase; display: grid; place-items: center; cursor: pointer; }
@@ -840,6 +856,15 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
     <button class="btn ghost sm" id="adminBtn" title="Admin panel" style="display:none"><span class="btn-icon">⚙</span><span class="btn-label">Admin</span></button>
     <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
 
+    <!-- notifications (bell → dropdown) -->
+    <div class="notif-menu">
+      <button class="notif-btn" id="notifBtn" title="Notifications" aria-haspopup="true">🔔<span class="notif-badge" id="notifBadge" style="display:none">0</span></button>
+      <div class="notif-dropdown" id="notifDropdown">
+        <div class="nd-head">Notifications</div>
+        <div id="notifList" class="nd-list"></div>
+      </div>
+    </div>
+
     <!-- user menu (avatar → dropdown) -->
     <div class="user-menu">
       <button class="user-avatar-btn" id="userMenuBtn" title="Account" aria-haspopup="true"><span id="userAvatar">?</span></button>
@@ -1139,6 +1164,8 @@ const API = {
   },
   me() { return this._fetch('/api/auth/me'); },
   logout() { return this._fetch('/api/auth/logout', { method: 'POST' }); },
+  notifications() { return this._fetch('/api/notifications'); },
+  markNotificationsRead() { return this._fetch('/api/notifications/read', { method: 'POST' }); },
   adminUsers() { return this._fetch('/api/admin/users'); },
   adminSetPermission(id, permission) { return this._fetch('/api/admin/users/' + id + '/permission', { method: 'PATCH', body: JSON.stringify({ permission }) }); },
   adminWidgets() { return this._fetch('/api/admin/widgets'); },
@@ -2792,6 +2819,50 @@ function applyAccountUI() {
 }
 
 /* =====================================================================
+   Notifications (bell)
+   ===================================================================== */
+let notifState = [];
+function notifTimeAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+function updateNotifBadge(n) {
+  const b = $('#notifBadge'); if (!b) return;
+  if (n > 0) { b.textContent = n > 9 ? '9+' : n; b.style.display = ''; } else b.style.display = 'none';
+}
+async function loadNotifications() {
+  try { const { notifications, unread } = await API.notifications(); notifState = notifications || []; updateNotifBadge(unread); }
+  catch (e) { /* ignore */ }
+}
+function renderNotifications() {
+  const list = $('#notifList'); if (!list) return;
+  if (!notifState.length) { list.innerHTML = '<div class="nd-empty">No notifications yet.</div>'; return; }
+  list.innerHTML = notifState.map(n =>
+    `<div class="nd-item ${n.read ? '' : 'unread'}" data-link="${n.link ? escapeHtml(n.link) : ''}">${escapeHtml(n.message)}<span class="nd-time">${notifTimeAgo(n.created_at)}</span></div>`).join('');
+  list.querySelectorAll('.nd-item').forEach(it => it.onclick = async () => {
+    $('#notifDropdown').classList.remove('open');
+    const link = it.dataset.link;
+    if (!link) return;
+    if (!dashboardsList.some(d => d.id === link)) {
+      try { const { dashboards } = await API.listDashboards(); dashboardsList = dashboards || []; renderDashboardPicker(); } catch (e) {}
+    }
+    if (dashboardsList.some(d => d.id === link)) openDashboard(link);
+  });
+}
+async function toggleNotif() {
+  const dd = $('#notifDropdown'); if (!dd) return;
+  if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+  $('#userDropdown')?.classList.remove('open');
+  await loadNotifications();
+  renderNotifications();
+  dd.classList.add('open');
+  try { await API.markNotificationsRead(); notifState.forEach(n => n.read = 1); updateNotifBadge(0); } catch (e) {}
+}
+
+/* =====================================================================
    Multi-database connections
    ===================================================================== */
 let connections = [];   // [{id,name,host,port,database,username,status}]
@@ -3060,9 +3131,14 @@ function init() {
     location.href = '/login';
   };
   // Toolbar overflow (⋯) + user-avatar dropdown
-  $('#overflowBtn').onclick = (e) => { e.stopPropagation(); $('#userDropdown').classList.remove('open'); $('#tbSecondary').classList.toggle('open'); };
-  $('#userMenuBtn').onclick = (e) => { e.stopPropagation(); $('#tbSecondary').classList.remove('open'); $('#userDropdown').classList.toggle('open'); };
-  document.addEventListener('click', () => { $('#tbSecondary')?.classList.remove('open'); $('#userDropdown')?.classList.remove('open'); });
+  $('#overflowBtn').onclick = (e) => { e.stopPropagation(); $('#userDropdown').classList.remove('open'); $('#notifDropdown')?.classList.remove('open'); $('#tbSecondary').classList.toggle('open'); };
+  $('#userMenuBtn').onclick = (e) => { e.stopPropagation(); $('#tbSecondary').classList.remove('open'); $('#notifDropdown')?.classList.remove('open'); $('#userDropdown').classList.toggle('open'); };
+  $('#notifBtn').onclick = (e) => { e.stopPropagation(); toggleNotif(); };
+  $('#notifDropdown').addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', () => { $('#tbSecondary')?.classList.remove('open'); $('#userDropdown')?.classList.remove('open'); $('#notifDropdown')?.classList.remove('open'); });
+  // poll notifications
+  loadNotifications();
+  setInterval(loadNotifications, 45000);
 
   // The data-source sidebar was removed; all data loading now happens inside
   // the graph builder. We still prime the shared table list the builder reads.

@@ -99,6 +99,15 @@ try {
   }
 } catch { /* fresh db already has it */ }
 db.exec(`CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT)`);
+// In-app notifications (e.g. "the admin shared a graph with you").
+db.exec(`CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  message TEXT NOT NULL,
+  link TEXT,
+  read INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+)`);
 // Saved database connections (credentials encrypted at rest, never echoed).
 db.exec(`CREATE TABLE IF NOT EXISTS connections (
   id TEXT PRIMARY KEY,
@@ -362,6 +371,10 @@ function hasWidgetAccess(userId, stateObj) {
 function stateHasGrantedWidget(stateJson, permMap) {
   return (safeParse(stateJson).views || []).some(v => (v.widgets || []).some(w => !!permMap[w.id]));
 }
+function notify(userId, message, link) {
+  db.prepare('INSERT INTO notifications (user_id,message,link,read,created_at) VALUES (?,?,?,0,?)')
+    .run(userId, message, link || null, Date.now());
+}
 // Every widget across every dashboard (for the admin visibility panel).
 function collectAllWidgets() {
   const out = [];
@@ -516,6 +529,16 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     }
 
+    /* ---------------- Notifications ---------------- */
+    if (p === '/api/notifications' && m === 'GET') {
+      const rows = db.prepare('SELECT id,message,link,read,created_at FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50').all(authUser.id);
+      return sendJson(res, 200, { notifications: rows, unread: rows.filter(r => !r.read).length });
+    }
+    if (p === '/api/notifications/read' && m === 'POST') {
+      db.prepare('UPDATE notifications SET read=1 WHERE user_id=?').run(authUser.id);
+      return sendJson(res, 200, { ok: true });
+    }
+
     /* ---------------- User directory (for sharing) ---------------- */
     if (p === '/api/users' && m === 'GET') {
       const rows = db.prepare('SELECT id,name,email,account_type,permission FROM app_users ORDER BY name, email').all();
@@ -560,6 +583,10 @@ const server = http.createServer(async (req, res) => {
         if (!target || target.account_type !== 'user') return sendJson(res, 404, { error: 'User not found' });
         const { permissions } = await readBody(req);
         if (!Array.isArray(permissions)) return sendJson(res, 400, { error: 'permissions[] required' });
+        // remember what they had before, so we can notify only on NEW grants
+        const before = {};
+        db.prepare('SELECT widget_id, permission FROM widget_permissions WHERE user_id=?').all(uid)
+          .forEach(r => { before[r.widget_id] = r.permission; });
         const ins = db.prepare(`INSERT INTO widget_permissions (widget_id,user_id,can_view,permission) VALUES (?,?,1,?)
                     ON CONFLICT(widget_id,user_id) DO UPDATE SET permission=excluded.permission`);
         db.exec('BEGIN');
@@ -571,6 +598,16 @@ const server = http.createServer(async (req, res) => {
           }
           db.exec('COMMIT');
         } catch (e) { db.exec('ROLLBACK'); throw e; }
+        // Notify the user about graphs newly shared with them (or access changed).
+        const info = {}; collectAllWidgets().forEach(w => { info[w.widget_id] = w; });
+        for (const r of permissions) {
+          const perm = PERMISSIONS.includes(r.permission) ? r.permission : 'viewer';
+          if (before[r.widget_id] !== perm) {
+            const w = info[r.widget_id];
+            const cap = perm === 'editor' ? 'edit' : 'view';
+            notify(uid, `You were given ${cap} access to “${(w && w.title) || 'a graph'}”`, w ? w.dashboard_id : null);
+          }
+        }
         return sendJson(res, 200, { ok: true });
       }
 
