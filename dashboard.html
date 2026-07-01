@@ -147,7 +147,9 @@ button { font-family: inherit; cursor: pointer; }
 .user-dropdown .ud-head { padding: 2px 4px 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
 .user-dropdown .ud-name { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .user-dropdown .ud-role { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--accent-2); font-weight: 600; margin-top: 2px; }
-.user-dropdown #logoutBtn { width: 100%; justify-content: center; }
+/* Always visible in both themes (override the toolbar's white ghost text) */
+.user-dropdown #logoutBtn { width: 100%; justify-content: center; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+.user-dropdown #logoutBtn:hover { background: rgba(255,94,122,0.12); border-color: var(--danger); color: var(--danger); }
 
 /* Collapse secondary controls (rows/engine/Refresh/Theme) into the ⋯ menu.
    Primary actions (Share, Connect DB, Admin, New graph) + user menu stay visible. */
@@ -1636,7 +1638,7 @@ function buildWidget(w, idx) {
     ? `<button class="icon-btn" title="Edit graph" data-act="edit">✏️</button>`
     : '';
   const removeControl = canEditW
-    ? `<button class="icon-btn danger" title="Remove" data-act="remove">✕</button>`
+    ? `<button class="icon-btn danger" title="Delete graph" data-act="remove">🗑</button>`
     : '';
   const footHtml = canEditW ? `<div class="w-foot"><button class="w-edit-link" data-act="edit">Edit graph</button></div>` : '';
   el.innerHTML = `
@@ -1714,7 +1716,7 @@ function toggleMaximize(w, el, btn) {
   if (!bd) { bd = document.createElement('div'); bd.className = 'maximize-backdrop'; bd.onclick = restoreMaximize; document.body.appendChild(bd); }
   requestAnimationFrame(()=>bd.classList.add('show'));
   el.classList.add('maximized');
-  btn.textContent = '🗕'; btn.title = 'Restore';
+  btn.textContent = '✕'; btn.title = 'Minimize';   // ✕ closes the fullscreen view (does NOT delete)
   setTimeout(()=>{ if (charts[w.id]) { try{charts[w.id].resize()}catch(e){} } }, 200);
 }
 function restoreMaximize() {
@@ -1723,7 +1725,7 @@ function restoreMaximize() {
   if (el) {
     el.classList.remove('maximized');
     const b = el.querySelector('[data-act="maximize"]');
-    if (b) { b.textContent = '⛶'; b.title = 'Expand'; }
+    if (b) { b.textContent = '⛶'; b.title = 'Expand'; }   // back to expand glyph when restored
     const id = el.dataset.id;
     setTimeout(()=>{ if (charts[id]) { try{charts[id].resize()}catch(e){} } }, 60);
   }
