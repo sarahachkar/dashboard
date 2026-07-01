@@ -329,29 +329,38 @@ function requireEditorOrAdmin(u, res) { if (!canEditAcct(u)) { sendJson(res, 403
    Access is boolean (a row = granted); whether that access is view or edit
    is decided by the account's permission (viewer→view, editor→edit).
    ===================================================================== */
-function userGrantedWidgetIds(userId) {
-  return new Set(db.prepare('SELECT widget_id FROM widget_permissions WHERE user_id=?').all(userId).map(r => r.widget_id));
+// Per-widget permission for a user: { widget_id: 'viewer' | 'editor' }.
+function userWidgetPermMap(userId) {
+  const map = {};
+  db.prepare('SELECT widget_id, permission FROM widget_permissions WHERE user_id=?').all(userId)
+    .forEach(r => { map[r.widget_id] = r.permission; });
+  return map;
 }
-// Filtered copy of dashboard state for `user`, each kept widget tagged _perm.
+// Filtered copy of dashboard state for `user`. Owners/admins see all (editable);
+// everyone else sees ONLY widgets with an explicit permission row, and their
+// capability is that row's permission (viewer→view, editor→edit).
 function filterStateForUser(stateObj, user, ownerId) {
   if (!stateObj) return stateObj;
-  const full = user.id === ownerId || isAdminAcct(user);   // owners & admins see all, editable
-  const granted = full ? null : userGrantedWidgetIds(user.id);
-  const cap = user.permission === 'editor' ? 'edit' : 'view';   // capability on granted widgets
+  const full = user.id === ownerId || isAdminAcct(user);
+  const perms = full ? null : userWidgetPermMap(user.id);
   (stateObj.views || []).forEach(v => {
     if (!Array.isArray(v.widgets)) return;
     v.widgets = v.widgets.filter(w => {
       if (full) { w._perm = 'edit'; return true; }
-      if (!granted.has(w.id)) return false;
-      w._perm = cap;
+      const p = perms[w.id];
+      if (!p) return false;                          // no row = no access, hidden
+      w._perm = p === 'editor' ? 'edit' : 'view';
       return true;
     });
   });
   return stateObj;
 }
 function hasWidgetAccess(userId, stateObj) {
-  const granted = userGrantedWidgetIds(userId);
-  return (stateObj.views || []).some(v => (v.widgets || []).some(w => granted.has(w.id)));
+  const perms = userWidgetPermMap(userId);
+  return (stateObj.views || []).some(v => (v.widgets || []).some(w => !!perms[w.id]));
+}
+function stateHasGrantedWidget(stateJson, permMap) {
+  return (safeParse(stateJson).views || []).some(v => (v.widgets || []).some(w => !!permMap[w.id]));
 }
 // Every widget across every dashboard (for the admin visibility panel).
 function collectAllWidgets() {
@@ -535,24 +544,29 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { widgets: collectAllWidgets() });
 
       // Which widgets a user is granted access to.
+      // A user's per-graph permission rows: [{ widget_id, permission }].
       if (p === '/api/admin/permissions' && m === 'GET') {
         const uid = Number(url.searchParams.get('user_id'));
-        const ids = db.prepare('SELECT widget_id FROM widget_permissions WHERE user_id=?').all(uid).map(r => r.widget_id);
-        return sendJson(res, 200, { widget_ids: ids });
+        const rows = db.prepare('SELECT widget_id, permission FROM widget_permissions WHERE user_id=?').all(uid);
+        return sendJson(res, 200, { permissions: rows });
       }
 
-      // Bulk-save a user's graph access (granted true/false per widget).
-      if (p === '/api/admin/permissions' && m === 'POST') {
-        const { user_id, grants } = await readBody(req);
-        if (!user_id || !Array.isArray(grants)) return sendJson(res, 400, { error: 'user_id and grants[] required' });
-        const ins = db.prepare(`INSERT INTO widget_permissions (widget_id,user_id,can_view,permission) VALUES (?,?,1,'view')
-                    ON CONFLICT(widget_id,user_id) DO NOTHING`);
-        const del = db.prepare('DELETE FROM widget_permissions WHERE widget_id=? AND user_id=?');
+      // Replace ALL of a user's graph permissions at once. Any widget not in
+      // the list gets NO access (its row is removed).
+      if (p.match(/^\/api\/admin\/users\/\d+\/permissions$/) && m === 'PATCH') {
+        const uid = Number(p.split('/')[4]);
+        const target = db.prepare('SELECT account_type FROM app_users WHERE id=?').get(uid);
+        if (!target || target.account_type !== 'user') return sendJson(res, 404, { error: 'User not found' });
+        const { permissions } = await readBody(req);
+        if (!Array.isArray(permissions)) return sendJson(res, 400, { error: 'permissions[] required' });
+        const ins = db.prepare(`INSERT INTO widget_permissions (widget_id,user_id,can_view,permission) VALUES (?,?,1,?)
+                    ON CONFLICT(widget_id,user_id) DO UPDATE SET permission=excluded.permission`);
         db.exec('BEGIN');
         try {
-          for (const g of grants) {
-            if (g.granted) ins.run(g.widget_id, Number(user_id));
-            else del.run(g.widget_id, Number(user_id));
+          db.prepare('DELETE FROM widget_permissions WHERE user_id=?').run(uid);   // clear then re-add
+          for (const r of permissions) {
+            const perm = PERMISSIONS.includes(r.permission) ? r.permission : 'viewer';
+            if (r.widget_id) ins.run(String(r.widget_id), uid, perm);
           }
           db.exec('COMMIT');
         } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -648,11 +662,11 @@ const server = http.createServer(async (req, res) => {
         rows = db.prepare('SELECT id,title,owner_id,visibility,share_token,updated_at FROM dashboards ORDER BY updated_at DESC').all();
       } else {
         // own + shared + dashboard-granted + any dashboard containing a widget granted to me
-        const granted = userGrantedWidgetIds(authUser.id);
+        const perms = userWidgetPermMap(authUser.id);
         rows = db.prepare('SELECT id,title,owner_id,visibility,share_token,state_json,updated_at FROM dashboards ORDER BY updated_at DESC').all()
           .filter(r => r.owner_id === authUser.id || r.visibility === 'shared'
             || db.prepare('SELECT 1 FROM dashboard_grants WHERE dashboard_id=? AND user_id=?').get(r.id, authUser.id)
-            || (granted.size && (safeParse(r.state_json).views || []).some(v => (v.widgets || []).some(w => granted.has(w.id)))))
+            || (stateHasGrantedWidget(r.state_json, perms)))
           .map(({ state_json, ...r }) => r);
       }
       return sendJson(res, 200, { dashboards: rows.map(r => ({ ...r, mine: r.owner_id === authUser.id })) });
@@ -738,8 +752,8 @@ const server = http.createServer(async (req, res) => {
       /* --- single-widget edit/delete: owner/admin OR a user granted 'edit' --- */
       if (action === 'widgets') {
         const wid = decodeURIComponent(parts[5] || '');
-        // owner/admin, or an editor who was granted access to this widget
-        const canEditWidget = mayEdit || (canEditAcct(authUser) && userGrantedWidgetIds(authUser.id).has(wid));
+        // owner/admin, or a user whose per-graph permission on this widget is 'editor'
+        const canEditWidget = mayEdit || userWidgetPermMap(authUser.id)[wid] === 'editor';
         if (!canEditWidget) return sendJson(res, 403, { error: 'Forbidden' });
         const state = safeParse(row.state_json);
         let found = null, ownerView = null;
