@@ -675,6 +675,13 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 .binput { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; font-size: 13px; font-family: inherit; outline: none; transition: border-color .15s; }
 .binput:focus { border-color: var(--accent); }
 .btype-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* Conditional-coloring rule rows */
+.th-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.th-row .binput { padding: 6px 8px; font-size: 12.5px; }
+.th-row .th-op { flex: 0 0 90px; }
+.th-row .th-val, .th-row .th-min, .th-row .th-max { flex: 1; min-width: 0; }
+.th-row .th-color { width: 34px; height: 32px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); cursor: pointer; flex: none; }
+.th-row .th-del { flex: none; }
 .btype { display: flex; align-items: center; justify-content: center; text-align: center; padding: 11px 8px; border-radius: 10px; background: var(--bg); border: 1.5px solid transparent; color: var(--text-dim); font-size: 12px; font-weight: 500; cursor: pointer; transition: all .15s; }
 .btype:hover { border-color: var(--border); color: var(--text); }
 .btype.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
@@ -2120,17 +2127,38 @@ function stackScales(stack){
   if (stack){ a.x.stacked=true; a.y.stacked=true; }
   return a;
 }
+// Conditional coloring — first matching rule wins, else the default color.
+function colorForValue(value, thresholds, defaultColor) {
+  const v = +value;
+  for (const rule of thresholds || []) {
+    if (rule.op === 'lt'  && v <  rule.value) return rule.color;
+    if (rule.op === 'lte' && v <= rule.value) return rule.color;
+    if (rule.op === 'gt'  && v >  rule.value) return rule.color;
+    if (rule.op === 'gte' && v >= rule.value) return rule.color;
+    if (rule.op === 'between' && Array.isArray(rule.value) && v >= rule.value[0] && v <= rule.value[1]) return rule.color;
+  }
+  return defaultColor;
+}
 function seriesStyle(w, {label, data, color, multi}) {
   const t = w.type;
+  const th = (w.thresholds && w.thresholds.length) ? w.thresholds : null;   // per-point conditional colors
   if (['line','spline','step','sparkline'].includes(t)) {
     const s = { label, data, borderColor:color, backgroundColor:color+'33', pointHoverRadius:5, fill:false,
                 pointRadius: t==='sparkline' ? 0 : 2, borderWidth: t==='sparkline' ? 2 : 3 };
     if (t==='spline') s.tension = 0.5; else if (t==='step') s.stepped = true; else s.tension = .35;
+    if (th) { const pc = data.map(v => colorForValue(v, th, color)); s.pointBackgroundColor = pc; s.pointBorderColor = pc; s.pointRadius = Math.max(s.pointRadius, 4); }
     return s;
   }
-  if (t==='area' || t==='stackedArea') return { label, data, borderColor:color, backgroundColor:color+'55', tension:.35, pointRadius:0, fill:true };
-  // bar family (bar/column/hbar/stacked/hstacked/stacked100) — color each bar for single series
-  const bg = (multi && !w.group) ? data.map((_,i)=>multi[i%multi.length]) : color;
+  if (t==='area' || t==='stackedArea') {
+    const s = { label, data, borderColor:color, backgroundColor:color+'55', tension:.35, pointRadius:0, fill:true };
+    if (th) { const pc = data.map(v => colorForValue(v, th, color)); s.pointBackgroundColor = pc; s.pointBorderColor = pc; s.pointRadius = 4; }
+    return s;
+  }
+  // bar family (bar/column/hbar/stacked/hstacked/stacked100) — per-point color
+  const bg = data.map((v,i) => {
+    const dflt = (multi && !w.group) ? multi[i%multi.length] : color;   // existing default
+    return th ? colorForValue(v, th, dflt) : dflt;
+  });
   return { label, data, backgroundColor:bg, borderColor:color, borderWidth:0, borderRadius:4 };
 }
 function round(v){ return typeof v==='number' ? Math.round(v*1000)/1000 : v; }
@@ -2605,18 +2633,55 @@ function renderBuilderForm() {
       <div class="bfield"><label>Aggregate</label><select class="binput" id="bAgg">${AGGREGATES.map(a => `<option value="${a}" ${a === d.agg ? 'selected' : ''}>${AGG_LABELS[a]}</option>`).join('')}</select></div>
     </div>
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+    ${THRESHOLD_TYPES.includes(d.type) ? `
+    <div class="bfield" id="bThresholdsField">
+      <label>Conditional coloring</label>
+      <div class="bhint" style="margin:0 0 8px">Color each data point by its value — first matching rule wins; otherwise the default color is used.</div>
+      <div id="bThresholds"></div>
+      <button type="button" class="btn sm" id="bAddThreshold" style="margin-top:8px">+ Add rule</button>
+    </div>` : ''}
     ${cols.length ? '' : '<div class="bhint" style="color:var(--warn)">⚠ Open the <b>Data source</b> section above to load data first — then your column selectors will appear.</div>'}
   `;
   $('#bTitle').oninput = e => { d.title = e.target.value; };
   $$('#builderForm .btype').forEach(b => b.onclick = () => {
     d.type = b.dataset.type;
-    $$('#builderForm .btype').forEach(x => x.classList.toggle('active', x.dataset.type === d.type));
-    updateBuilderHeading();
-    builderPreview();
+    renderBuilderForm();   // re-render (threshold section visibility depends on type) + preview
   });
   const bind = (id, key) => { const el = $(id); if (el) el.onchange = () => { d[key] = el.value; builderPreview(); }; };
   bind('#bX', 'x'); bind('#bY', 'y'); bind('#bGroup', 'group'); bind('#bAgg', 'agg'); bind('#bTheme', 'theme');
+  if (THRESHOLD_TYPES.includes(d.type)) {
+    renderThresholdRows();
+    $('#bAddThreshold').onclick = () => { d.thresholds = d.thresholds || []; d.thresholds.push({ op: 'lt', value: 0, color: '#e24b4a' }); renderThresholdRows(); builderPreview(); };
+  }
   builderPreview();
+}
+const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea'];
+function renderThresholdRows() {
+  const wrap = $('#bThresholds'); if (!wrap) return;
+  const d = builderDraft; d.thresholds = d.thresholds || [];
+  const OPS = [['lt','&lt;'],['lte','≤'],['gt','&gt;'],['gte','≥'],['between','between']];
+  wrap.innerHTML = d.thresholds.length ? d.thresholds.map((r, i) => `
+    <div class="th-row" data-i="${i}">
+      <select class="binput th-op" data-i="${i}">${OPS.map(([v,l])=>`<option value="${v}" ${r.op===v?'selected':''}>${l}</option>`).join('')}</select>
+      ${r.op === 'between'
+        ? `<input class="binput th-min" data-i="${i}" type="number" value="${Array.isArray(r.value)?(r.value[0]??''):''}" placeholder="min">
+           <input class="binput th-max" data-i="${i}" type="number" value="${Array.isArray(r.value)?(r.value[1]??''):''}" placeholder="max">`
+        : `<input class="binput th-val" data-i="${i}" type="number" value="${r.value ?? ''}" placeholder="value">`}
+      <input type="color" class="th-color" data-i="${i}" value="${r.color || '#e24b4a'}" title="Color">
+      <button type="button" class="icon-btn danger th-del" data-i="${i}" title="Remove rule">✕</button>
+    </div>`).join('') : '<div class="bhint">No rules yet — click “+ Add rule”.</div>';
+  const num = el => { const n = parseFloat(el.value); return isNaN(n) ? 0 : n; };
+  wrap.querySelectorAll('.th-op').forEach(el => el.onchange = () => {
+    const r = d.thresholds[+el.dataset.i]; r.op = el.value;
+    if (r.op === 'between') r.value = Array.isArray(r.value) ? r.value : [0, 0];
+    else if (Array.isArray(r.value)) r.value = r.value[0] || 0;
+    renderThresholdRows(); builderPreview();
+  });
+  wrap.querySelectorAll('.th-val').forEach(el => el.oninput = () => { d.thresholds[+el.dataset.i].value = num(el); builderPreview(); });
+  wrap.querySelectorAll('.th-min').forEach(el => el.oninput = () => { const r = d.thresholds[+el.dataset.i]; r.value = [num(el), Array.isArray(r.value) ? (r.value[1]||0) : 0]; builderPreview(); });
+  wrap.querySelectorAll('.th-max').forEach(el => el.oninput = () => { const r = d.thresholds[+el.dataset.i]; r.value = [Array.isArray(r.value) ? (r.value[0]||0) : 0, num(el)]; builderPreview(); });
+  wrap.querySelectorAll('.th-color').forEach(el => el.oninput = () => { d.thresholds[+el.dataset.i].color = el.value; builderPreview(); });
+  wrap.querySelectorAll('.th-del').forEach(el => el.onclick = () => { d.thresholds.splice(+el.dataset.i, 1); renderThresholdRows(); builderPreview(); });
 }
 
 function renderBuilder() { renderBuilderForm(); }  // keep old call signature working
