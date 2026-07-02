@@ -1487,8 +1487,9 @@ function filteredRows() {
    Aggregation helper: group rows by `key`, aggregate `val` (sum)
    ===================================================================== */
 /* Available aggregate functions (value → label) */
-const AGGREGATES = ['sum','avg','count','distinct','min','max','median','product','range','stddev'];
+const AGGREGATES = ['none','sum','avg','count','distinct','min','max','median','product','range','stddev'];
 const AGG_LABELS = {
+  none:'None (raw values)',
   sum:'Sum', avg:'Average', count:'Count', distinct:'Count distinct',
   min:'Minimum', max:'Maximum', median:'Median', product:'Product',
   range:'Range (max − min)', stddev:'Std deviation'
@@ -1498,6 +1499,7 @@ function aggValues(vs, agg) {
   if (!n) return 0;
   const sum = vs.reduce((a,b)=>a+b,0);
   switch (agg) {
+    case 'none':    return vs[n-1];   // raw: last value (KPI etc. get a single sensible value)
     case 'avg':     return sum / n;
     case 'count':   return n;
     case 'distinct':return new Set(vs).size;
@@ -1511,6 +1513,8 @@ function aggValues(vs, agg) {
   }
 }
 function aggregate(rows, key, val, agg='sum') {
+  // 'none' = raw values: one [x,y] pair per row, in original order (no grouping/dedup).
+  if (agg === 'none') return rows.map(r => [r[key], +r[val] || 0]);
   const map = new Map();
   rows.forEach(r => {
     const k = r[key]; const v = +r[val] || 0;
@@ -2082,7 +2086,7 @@ function buildChartConfig(w, rows) {
 
   if (t==='radar') {
     const agg = aggregate(rows, w.x, w.y, w.agg);
-    agg.sort((a,b)=> String(a[0])>String(b[0])?1:-1);
+    if (w.agg !== 'none') agg.sort((a,b)=> String(a[0])>String(b[0])?1:-1);   // keep raw order for 'none'
     return {
       type:'radar',
       data:{ labels: agg.map(a=>a[0]), datasets:[{ label:w.y, data:agg.map(a=>round(a[1])), backgroundColor:hexA(colors[0],0.25), borderColor:colors[0], pointBackgroundColor:colors[0], borderWidth:2 }] },
@@ -2151,7 +2155,7 @@ function buildChartConfig(w, rows) {
     });
   } else {
     const agg = aggregate(rows, w.x, w.y, w.agg);
-    agg.sort((a,b)=> String(a[0])>String(b[0])?1:-1);
+    if (w.agg !== 'none') agg.sort((a,b)=> String(a[0])>String(b[0])?1:-1);   // keep raw order for 'none'
     labels = agg.map(a=>a[0]);
     datasets = [ seriesStyle(w, { label: w.y, data: agg.map(a=>round(a[1])), color: colors[0], multi:colors }) ];
   }
