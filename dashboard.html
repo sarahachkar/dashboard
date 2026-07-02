@@ -123,6 +123,22 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ===== Dashboard picker + save indicator ===== */
 .dash-picker { background: rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.20); border-radius:8px; padding:6px 8px; font-size:12.5px; font-family:inherit; max-width:170px; outline:none; cursor:pointer; }
+/* 2-level dashboard menu */
+.dash-menu { position: relative; }
+.dash-menu-btn { display:inline-flex; align-items:center; gap:6px; max-width:200px; background: rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.20); border-radius:8px; padding:6px 10px; font-size:12.5px; font-family:inherit; cursor:pointer; }
+.dash-menu-btn:hover { border-color: var(--accent); }
+.dash-menu-btn #dashMenuLabel { max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dash-menu-btn .dm-arrow { opacity:.6; }
+.dash-menu-panel { position:absolute; top:calc(100% + 6px); left:0; z-index:60; min-width:240px; max-width:300px; max-height:60vh; overflow-y:auto; background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow); padding:6px; display:none; }
+.dash-menu-panel.open { display:block; }
+.dm-section { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); font-weight:700; padding:8px 10px 4px; }
+.dm-item { display:flex; align-items:center; width:100%; text-align:left; gap:8px; background:transparent; border:none; color:var(--text); font-size:13px; font-family:inherit; padding:8px 10px; border-radius:7px; cursor:pointer; }
+.dm-item:hover { background:var(--panel-2); }
+.dm-item .dm-caret { margin-left:auto; color:var(--text-dim); }
+.dm-item .dm-owner { margin-left:auto; font-size:11px; color:var(--text-dim); }
+.dm-back { display:flex; align-items:center; width:100%; text-align:left; background:transparent; border:none; color:var(--accent); font-size:12.5px; font-weight:600; font-family:inherit; padding:6px 10px; border-radius:7px; cursor:pointer; }
+.dm-back:hover { background:rgba(124,92,252,0.1); }
+.dm-hint { padding:10px; color:var(--text-dim); font-size:12px; }
 .dash-picker:focus { border-color: var(--accent); }
 .save-indicator { font-size:11px; font-weight:600; padding:5px 10px; border-radius:999px; white-space:nowrap; }
 .save-indicator.saved { color:var(--accent-2); background:rgba(0,229,176,0.12); }
@@ -833,7 +849,10 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <div class="tb-group tb-left">
     <div class="tb-logo">N</div>
     <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" title="Rename this dashboard">
-    <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
+    <div class="dash-menu" id="dashMenu">
+      <button class="dash-menu-btn" id="dashMenuBtn" title="Switch dashboard" aria-haspopup="true"><span id="dashMenuLabel">Dashboard</span><span class="dm-arrow">▾</span></button>
+      <div class="dash-menu-panel" id="dashMenuPanel"></div>
+    </div>
     <button class="btn ghost sm icon-only" id="newDashBtn" title="New dashboard">＋</button>
     <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard">🗑</button>
     <span class="save-indicator saved" id="saveIndicator" title="Save status">✓ Saved</span>
@@ -1527,7 +1546,15 @@ function applyState(s) {
   s = s || {};
   state.views = (s.views && s.views.length) ? s.views : [{ name: 'Overview', widgets: defaultWidgets() }];
   activeView = Math.min(s.activeView || 0, state.views.length - 1);
-  if (s.theme) { state.theme = s.theme; document.documentElement.setAttribute('data-theme', s.theme); }
+  // NOTE: do NOT apply a dashboard's saved theme to the whole app — the color
+  // scheme is a personal per-account preference (see applyTheme / localStorage),
+  // so opening someone else's dashboard never flips your UI.
+}
+/* Personal color scheme (per browser/account), independent of any dashboard. */
+function applyTheme(theme) {
+  const t = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('nexus_theme', t); } catch (e) {}
 }
 function setSaveIndicator(status) {   // 'saved' | 'unsaved' | 'saving'
   const el = $('#saveIndicator'); if (!el) return;
@@ -1612,18 +1639,68 @@ async function deleteDashboard() {
   } catch (e) { toast('Delete failed: ' + e.message, true); }
 }
 
+// Update the menu button label to the current dashboard's title.
 function renderDashboardPicker() {
-  const sel = $('#dashPicker'); if (!sel) return;
-  sel.innerHTML = dashboardsList.map(d => {
-    let tag = '';
-    if (d.mine === false) {
-      const owner = d.owner_name || d.owner_email || 'another user';
-      const access = d.visibility === 'shared' ? 'shared' : 'view-only';
-      tag = ` — ${owner} (${access})`;
+  const label = $('#dashMenuLabel'); if (!label) return;
+  const cur = dashboardsList.find(d => d.id === state.id);
+  label.textContent = cur ? cur.title : (state.title || 'Dashboard');
+}
+
+/* ---- 2-level dashboard menu: My Dashboards / Users → user → their dashboards ---- */
+let dashMenuView = { level: 'root' };
+let dmUsersCache = [];
+function closeDashMenu() { $('#dashMenuPanel')?.classList.remove('open'); }
+function toggleDashMenu() {
+  const panel = $('#dashMenuPanel'); if (!panel) return;
+  if (panel.classList.contains('open')) { closeDashMenu(); return; }
+  dashMenuView = { level: 'root' };
+  renderDashMenu();
+  panel.classList.add('open');
+}
+async function renderDashMenu() {
+  const panel = $('#dashMenuPanel'); if (!panel) return;
+  const esc = escapeHtml;
+  const openDash = (id) => {
+    closeDashMenu();
+    if (!dashboardsList.some(d => d.id === id)) {
+      API.listDashboards().then(({ dashboards }) => { dashboardsList = dashboards || []; }).catch(() => {});
     }
-    return `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}${escapeHtml(tag)}</option>`;
-  }).join('');
-  sel.style.display = dashboardsList.length ? '' : 'none';
+    openDashboard(id);
+  };
+
+  if (dashMenuView.level === 'root') {
+    const mine = dashboardsList.filter(d => d.mine);
+    const shared = dashboardsList.filter(d => !d.mine);
+    let html = '<div class="dm-section">My Dashboards</div>';
+    html += mine.length ? mine.map(d => `<button class="dm-item" data-open="${d.id}">${esc(d.title)}</button>`).join('') : '<div class="dm-hint">No dashboards yet</div>';
+    if (isAdmin()) {
+      html += '<div class="dm-section">Browse</div><button class="dm-item" data-go="users">👥 Users<span class="dm-caret">›</span></button>';
+    } else if (shared.length) {
+      html += '<div class="dm-section">Shared with me</div>';
+      html += shared.map(d => `<button class="dm-item" data-open="${d.id}">${esc(d.title)}<span class="dm-owner">${esc(d.owner_name || d.owner_email || '')}</span></button>`).join('');
+    }
+    panel.innerHTML = html;
+  } else if (dashMenuView.level === 'users') {
+    panel.innerHTML = '<button class="dm-back" data-go="root">‹ Back</button><div class="dm-hint">Loading…</div>';
+    try {
+      const { users } = await API.adminUsers();
+      dmUsersCache = users;
+      panel.innerHTML = '<button class="dm-back" data-go="root">‹ Back</button><div class="dm-section">Users</div>' +
+        (users.length ? users.map(u => `<button class="dm-item" data-user="${u.id}">${esc(u.name || u.email)}<span class="dm-caret">›</span></button>`).join('') : '<div class="dm-hint">No users yet</div>');
+    } catch (e) { panel.innerHTML = '<button class="dm-back" data-go="root">‹ Back</button><div class="dm-hint">Failed: ' + esc(e.message) + '</div>'; }
+  } else if (dashMenuView.level === 'userDash') {
+    const u = dashMenuView.user;
+    panel.innerHTML = '<button class="dm-back" data-go="users">‹ Users</button><div class="dm-hint">Loading…</div>';
+    try {
+      const { dashboards } = await API.adminUserDashboards(u.id);
+      panel.innerHTML = '<button class="dm-back" data-go="users">‹ Users</button><div class="dm-section">' + esc(u.name || u.email) + '</div>' +
+        (dashboards.length ? dashboards.map(d => `<button class="dm-item" data-open="${d.id}">${esc(d.title)}</button>`).join('') : '<div class="dm-hint">No dashboards</div>');
+    } catch (e) { panel.innerHTML = '<button class="dm-back" data-go="users">‹ Users</button><div class="dm-hint">Failed: ' + esc(e.message) + '</div>'; }
+  }
+
+  panel.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openDash(b.dataset.open));
+  panel.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { dashMenuView = { level: b.dataset.go }; renderDashMenu(); });
+  panel.querySelectorAll('[data-user]').forEach(b => b.onclick = () => { dashMenuView = { level: 'userDash', user: dmUsersCache.find(x => x.id === +b.dataset.user) }; renderDashMenu(); });
 }
 
 /* =====================================================================
@@ -3313,17 +3390,17 @@ function init() {
     renderBdManualTable();
   };
   $('#dashTitle').onchange = saveState;
-  // Dashboards: switch / new / delete
-  $('#dashPicker').onchange = (e) => { if (e.target.value !== state.id) openDashboard(e.target.value); };
+  // Dashboards: 2-level menu / new / delete
+  $('#dashMenuBtn').onclick = (e) => { e.stopPropagation(); toggleDashMenu(); };
+  $('#dashMenuPanel').addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('click', closeDashMenu);
   $('#newDashBtn').onclick = createDashboard;
   $('#delDashBtn').onclick = deleteDashboard;
   $('#themeBtn').onclick = ()=>{
-    const cur=document.documentElement.getAttribute('data-theme');
-    const next=cur==='dark'?'light':'dark';
-    document.documentElement.setAttribute('data-theme',next);
-    $('#themeBtn').textContent = 'Theme';
+    const next = document.documentElement.getAttribute('data-theme')==='dark' ? 'light' : 'dark';
+    applyTheme(next);                 // personal preference (localStorage) — not saved on the dashboard
     Chart.defaults.color=textColor();
-    state.theme=next; renderGrid(); saveState();
+    renderGrid();                     // recolor charts for the new scheme
   };
 
   // Keep the fixed-header offsets exact after resize/rotation
@@ -3339,8 +3416,8 @@ function init() {
   let searchTimer;
   $('#globalSearch').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ renderGrid(); },180); };
 
-  // restore theme
-  if (state.theme){ document.documentElement.setAttribute('data-theme',state.theme); $('#themeBtn').textContent='Theme'; }
+  // apply the personal color scheme (per browser/account), once
+  try { applyTheme(localStorage.getItem('nexus_theme') || 'dark'); } catch (e) {}
 
   refreshDateSelectors();
   renderAll();
