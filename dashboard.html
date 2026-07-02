@@ -2652,11 +2652,17 @@ function openBuilder(existing, presetType) {
   // If widget has its own saved dataset, restore it
   builderDataset = existing?.savedDataset ? existing.savedDataset : ds;
   builderConnId = existing?.connectionId || null;
-  // Restore the Manual grid from the widget's saved data so re-editing keeps it visible.
-  const sd0 = existing?.savedDataset;
-  bdManualModel = (sd0 && sd0.columns && sd0.columns.length)
-    ? { columns: sd0.columns.slice(), rows: (sd0.rows || []).map(r => sd0.columns.map(c => r[c])) }
-    : null;
+  // Restore the Manual grid ONLY when the data was entered manually (no
+  // connection / query source) — connection/query widgets keep the blank template.
+  if (existing && existing.savedDataset && !existing.connectionId) {
+    const ds = existing.savedDataset;
+    bdManualModel = {
+      columns: ds.columns.slice(),
+      rows: ds.rows.map(r => ds.columns.map(c => String(r[c] ?? '')))
+    };
+  } else {
+    bdManualModel = null;   // fresh widget, or data came from a connection/query — keep blank template
+  }
   refreshBdConnSelect();   // reflect currently-connected databases
 
   const cols = builderDataset ? builderDataset.columns : (ds ? ds.columns : []);
