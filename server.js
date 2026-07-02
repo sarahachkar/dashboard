@@ -714,10 +714,15 @@ const server = http.createServer(async (req, res) => {
     const isAdminUser = isAdminAcct(authUser);
     if (p === '/api/dashboards' && m === 'GET') {
       const rows = isAdminUser
-        ? db.prepare('SELECT id,title,owner_id,share_token,updated_at FROM dashboards ORDER BY updated_at DESC').all()
-        : db.prepare(`SELECT id,title,owner_id,share_token,updated_at FROM dashboards
-                      WHERE owner_id=? OR id IN (SELECT dashboard_id FROM dashboard_permissions WHERE user_id=?)
-                      ORDER BY updated_at DESC`).all(authUser.id, authUser.id);
+        ? db.prepare(`SELECT d.id, d.title, d.owner_id, d.share_token, d.updated_at,
+                             u.name AS owner_name, u.email AS owner_email
+                      FROM dashboards d JOIN app_users u ON u.id = d.owner_id
+                      ORDER BY d.updated_at DESC`).all()
+        : db.prepare(`SELECT d.id, d.title, d.owner_id, d.share_token, d.updated_at,
+                             u.name AS owner_name, u.email AS owner_email
+                      FROM dashboards d JOIN app_users u ON u.id = d.owner_id
+                      WHERE d.owner_id=? OR d.id IN (SELECT dashboard_id FROM dashboard_permissions WHERE user_id=?)
+                      ORDER BY d.updated_at DESC`).all(authUser.id, authUser.id);
       return sendJson(res, 200, { dashboards: rows.map(r => ({ ...r, mine: r.owner_id === authUser.id })) });
     }
 

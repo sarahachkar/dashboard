@@ -832,7 +832,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <!-- Left group: brand + dashboard name/picker -->
   <div class="tb-group tb-left">
     <div class="tb-logo">N</div>
-    <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" readonly title="Dashboard name (read-only)">
+    <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" title="Rename this dashboard">
     <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
     <button class="btn ghost sm icon-only" id="newDashBtn" title="New dashboard">＋</button>
     <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard">🗑</button>
@@ -1586,7 +1586,7 @@ async function openDashboard(id) {
   canEditCurrent = d.canEdit !== false;   // server-computed: owner or admin
   applyState(d.state);
   $('#dashTitle').value = state.title;
-  $('#dashTitle').readOnly = true;   // dashboard name is not editable
+  $('#dashTitle').readOnly = !canEditCurrent;   // owner/admin/editor can rename
   applyEditableUI();
   renderDashboardPicker();
   renderAll();
@@ -1615,8 +1615,13 @@ async function deleteDashboard() {
 function renderDashboardPicker() {
   const sel = $('#dashPicker'); if (!sel) return;
   sel.innerHTML = dashboardsList.map(d => {
-    const tag = d.mine === false ? (d.visibility === 'shared' ? ' (shared)' : ' (view-only)') : '';
-    return `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}${tag}</option>`;
+    let tag = '';
+    if (d.mine === false) {
+      const owner = d.owner_name || d.owner_email || 'another user';
+      const access = d.visibility === 'shared' ? 'shared' : 'view-only';
+      tag = ` — ${owner} (${access})`;
+    }
+    return `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}${escapeHtml(tag)}</option>`;
   }).join('');
   sel.style.display = dashboardsList.length ? '' : 'none';
 }
