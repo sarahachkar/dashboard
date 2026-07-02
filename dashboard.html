@@ -463,14 +463,14 @@ select.input { cursor: pointer; }
   background: var(--panel); border: 1.5px solid var(--border);
   border-radius: 16px;
   box-shadow: 0 2px 16px rgba(124,92,252,0.08), inset 0 1px 0 rgba(255,255,255,0.5);
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column; overflow: hidden; position: relative;
   grid-column: span 1; transition: box-shadow .25s ease, border-color .25s ease, transform .2s ease;
 }
 .widget:hover { box-shadow: 0 6px 28px rgba(124,92,252,0.18), 0 2px 8px rgba(0,0,0,0.06); border-color: var(--accent); transform: translateY(-2px); }
 /* ===== Card sizes (Issue 5) ===== */
 .widget.size-small  { grid-column: span 1; }
-.widget.size-medium { grid-column: span 1; }
-.widget.size-large  { grid-column: span 1; }
+.widget.size-medium { grid-column: span 2; }
+.widget.size-large  { grid-column: span 3; }
 .widget.drag-over { border-color: #4F46E5; border-style: dashed; }
 .widget.dragging { opacity: .4; }
 /* Minimized — shrink the whole card; chart AND controls stay available */
@@ -530,8 +530,16 @@ select.input { cursor: pointer; }
 /* canvas lives in a fixed-height holder so Chart.js responsive mode has a
    definite size to fill (prevents the infinite-grow feedback loop) */
 .chart-holder { position: relative; width: 100%; height: 200px; }
-.widget.size-large .chart-holder { height: 260px; }
+.widget.size-small  .chart-holder { height: 180px; }
+.widget.size-medium .chart-holder { height: 220px; }
+.widget.size-large  .chart-holder { height: 300px; }
 .widget.maximized .chart-holder { height: auto; flex: 1; align-self: stretch; }
+/* free drag-to-resize grip (bottom-right) */
+.resize-handle { position: absolute; right: 3px; bottom: 3px; width: 18px; height: 18px; cursor: nwse-resize; z-index: 4; color: var(--text-dim); opacity: .55; display: grid; place-items: end; }
+.resize-handle:hover { opacity: 1; color: var(--accent); }
+.resize-handle svg { width: 12px; height: 12px; }
+.widget.resizing { user-select: none; box-shadow: 0 0 0 2px var(--accent); }
+.widget.maximized .resize-handle { display: none; }
 .w-body canvas { display: block; }
 .w-error {
   margin: auto; text-align: center; color: var(--danger); font-size: 12.5px;
@@ -1780,6 +1788,7 @@ function buildWidget(w, idx) {
   el.className = `widget size-${w.size} ${pastelClass}` + (w.minimized ? ' minimized' : '') + (widgetEditable(w) ? '' : ' w-readonly');
   el.dataset.id = w.id;
   el.draggable = false;
+  if (w.colSpan) el.style.gridColumn = `span ${w.colSpan}`;   // free-resize width override
 
   const cols = dataset.columns;
   const opt = (arr, sel) => arr.map(c=>`<option ${c===sel?'selected':''}>${escapeHtml(c)}</option>`).join('');
@@ -1804,6 +1813,7 @@ function buildWidget(w, idx) {
       </div>
       <div class="w-controls">
         ${editControls}
+        ${canEditW ? `<button class="icon-btn" title="Cycle size (small / medium / large)" data-act="size">${(w.size||'medium')[0].toUpperCase()}</button>` : ''}
         <button class="icon-btn" title="Export PNG" data-act="export">⬇️</button>
         <button class="icon-btn" title="Expand" data-act="maximize">⛶</button>
         ${removeControl}
@@ -1811,6 +1821,7 @@ function buildWidget(w, idx) {
     </div>
     <div class="w-body" id="body-${w.id}"></div>
     ${footHtml}
+    ${canEditW ? `<div class="resize-handle" title="Drag to resize"><svg viewBox="0 0 12 12" fill="currentColor"><path d="M11 11H9V9h2v2zm0-4H9V5h2v2zM7 11H5V9h2v2zm4-8H9V1h2v2zM7 7H5V5h2v2zM3 11H1V9h2v2z"/></svg></div>` : ''}
   `;
 
   // title rename (only when editable)
@@ -1826,8 +1837,13 @@ function buildWidget(w, idx) {
       else if (act==='edit') openBuilder(w);
       else if (act==='minimize') toggleMinimize(w, el, b);
       else if (act==='maximize') toggleMaximize(w, el, b);
+      else if (act==='size') cycleWidgetSize(w);
     });
   });
+
+  // free drag-to-resize (bottom-right grip) — editable widgets only
+  const grip = el.querySelector('.resize-handle');
+  if (grip) grip.addEventListener('mousedown', e => startWidgetResize(e, w, el));
 
   // drag to reorder
   const head = el.querySelector('.widget-head');
@@ -1896,6 +1912,45 @@ function reorder(fromId, toId) {
   renderGrid(); saveState();
 }
 
+/* ===== Resizing: discrete step (small/medium/large) + free drag ===== */
+function cycleWidgetSize(w) {
+  const order = ['small','medium','large'];
+  w.size = order[(order.indexOf(w.size || 'medium') + 1) % order.length];
+  delete w.colSpan; delete w.heightPx;   // stepping to a preset clears any free-resize override
+  renderGrid(); saveState();
+}
+function startWidgetResize(e, w, el) {
+  e.preventDefault(); e.stopPropagation();
+  const grid = $('#grid');
+  const holder = el.querySelector('.chart-holder');
+  const cs = getComputedStyle(grid);
+  const tracks = cs.gridTemplateColumns.split(' ').filter(Boolean);
+  const maxCols = Math.max(1, tracks.length);
+  const colStep = (tracks.length ? parseFloat(tracks[0]) : el.offsetWidth) + (parseFloat(cs.columnGap) || 0);
+  const startX = e.clientX, startY = e.clientY;
+  const startSpan = w.colSpan || ({ small: 1, medium: 2, large: 3 }[w.size] || 1);
+  const startH = holder ? holder.getBoundingClientRect().height : 200;
+  el.classList.add('resizing');
+  let span = startSpan, h = startH;
+  const move = (ev) => {
+    span = Math.max(1, Math.min(maxCols, Math.round(startSpan + (ev.clientX - startX) / colStep)));
+    h = Math.max(140, Math.min(500, Math.round(startH + (ev.clientY - startY))));
+    el.style.gridColumn = `span ${span}`;
+    if (holder) holder.style.height = h + 'px';
+    if (charts[w.id]) { try { charts[w.id].resize(); } catch (err) {} }
+  };
+  const up = () => {
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup', up);
+    el.classList.remove('resizing');
+    w.colSpan = span; w.heightPx = h;   // persist the free size onto the widget
+    if (charts[w.id]) { try { charts[w.id].resize(); } catch (err) {} }
+    saveState();
+  };
+  document.addEventListener('mousemove', move);
+  document.addEventListener('mouseup', up);
+}
+
 /* =====================================================================
    Widget body rendering (charts)
    ===================================================================== */
@@ -1946,6 +2001,7 @@ function renderWidgetBody(w) {
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
+    if (w.heightPx) holder.style.height = w.heightPx + 'px';   // free-resize override
     const canvas = document.createElement('canvas');
     holder.appendChild(canvas);
     body.appendChild(holder);
