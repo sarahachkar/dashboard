@@ -80,6 +80,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS dashboard_grants (
   user_id INTEGER NOT NULL,
   PRIMARY KEY (dashboard_id, user_id)
 )`);
+// Per-dashboard, per-user permission: 'view' | 'edit' (admin/owner grants it).
+db.exec(`CREATE TABLE IF NOT EXISTS dashboard_permissions (
+  dashboard_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  permission TEXT NOT NULL DEFAULT 'view',
+  PRIMARY KEY (dashboard_id, user_id)
+)`);
 // Per-user, per-widget permission: 'none' | 'view' | 'edit'.
 // A non-owner sees a widget only if granted view/edit, and gets edit
 // controls only with 'edit'. Owners/admins always have full access.
@@ -374,6 +381,11 @@ function stateHasGrantedWidget(stateJson, permMap) {
 function notify(userId, message, link) {
   db.prepare('INSERT INTO notifications (user_id,message,link,read,created_at) VALUES (?,?,?,0,?)')
     .run(userId, message, link || null, Date.now());
+}
+// A user's granted permission on a dashboard ('view' | 'edit' | null).
+function dashboardPermFor(dashId, userId) {
+  const r = db.prepare('SELECT permission FROM dashboard_permissions WHERE dashboard_id=? AND user_id=?').get(dashId, userId);
+  return r ? r.permission : null;
 }
 // Every widget across every dashboard (for the admin visibility panel).
 function collectAllWidgets() {
@@ -685,43 +697,31 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 404, { error: 'Unknown connection endpoint' });
     }
 
-    /* ---------------- Dashboards (hybrid: private-by-default + sharing) ----------------
+    /* ---------------- Dashboards (per-dashboard permissions) ----------------
        Model:
-        - Every user privately OWNS their dashboards and has full control of them.
-        - An owner may mark a dashboard 'shared' so others can view it.
-        - editor can edit others' shared dashboards; viewer can only view them.
-        - admin has full control over everything (sees/edits/deletes all, can
-          change any dashboard's visibility).
+        - Every user can create MANY dashboards and fully owns/edits their own.
+        - An admin can view (and edit) all dashboards.
+        - On any dashboard, the owner or an admin grants each user a per-dashboard
+          permission: 'view' (read-only) or 'edit'.
     */
     const isAdminUser = isAdminAcct(authUser);
     if (p === '/api/dashboards' && m === 'GET') {
-      let rows;
-      if (isAdminUser) {
-        rows = db.prepare('SELECT id,title,owner_id,visibility,share_token,updated_at FROM dashboards ORDER BY updated_at DESC').all();
-      } else {
-        // own + shared + dashboard-granted + any dashboard containing a widget granted to me
-        const perms = userWidgetPermMap(authUser.id);
-        rows = db.prepare('SELECT id,title,owner_id,visibility,share_token,state_json,updated_at FROM dashboards ORDER BY updated_at DESC').all()
-          .filter(r => r.owner_id === authUser.id || r.visibility === 'shared'
-            || db.prepare('SELECT 1 FROM dashboard_grants WHERE dashboard_id=? AND user_id=?').get(r.id, authUser.id)
-            || (stateHasGrantedWidget(r.state_json, perms)))
-          .map(({ state_json, ...r }) => r);
-      }
+      const rows = isAdminUser
+        ? db.prepare('SELECT id,title,owner_id,share_token,updated_at FROM dashboards ORDER BY updated_at DESC').all()
+        : db.prepare(`SELECT id,title,owner_id,share_token,updated_at FROM dashboards
+                      WHERE owner_id=? OR id IN (SELECT dashboard_id FROM dashboard_permissions WHERE user_id=?)
+                      ORDER BY updated_at DESC`).all(authUser.id, authUser.id);
       return sendJson(res, 200, { dashboards: rows.map(r => ({ ...r, mine: r.owner_id === authUser.id })) });
     }
 
     if (p === '/api/dashboards' && m === 'POST') {
       if (!requireEditorOrAdmin(authUser, res)) return;
-      // One dashboard per user: if they already own one, return it instead of creating another.
-      const existing = db.prepare('SELECT * FROM dashboards WHERE owner_id=? ORDER BY created_at LIMIT 1').get(authUser.id);
-      if (existing) return sendJson(res, 200, { id: existing.id, title: existing.title, owner_id: existing.owner_id, visibility: existing.visibility, created_at: existing.created_at, updated_at: existing.updated_at });
       const d = await readBody(req);
       const id = 'dash_' + crypto.randomBytes(6).toString('hex');
       const now = Date.now();
-      const vis = d.visibility === 'shared' ? 'shared' : 'private';
       db.prepare('INSERT INTO dashboards (id,owner_id,title,state_json,visibility,created_at,updated_at) VALUES (?,?,?,?,?,?,?)')
-        .run(id, authUser.id, String(d.title || 'My Dashboard'), JSON.stringify(d.state || {}), vis, now, now);
-      return sendJson(res, 200, { id, title: d.title || 'My Dashboard', owner_id: authUser.id, visibility: vis, created_at: now, updated_at: now });
+        .run(id, authUser.id, String(d.title || 'My Dashboard'), JSON.stringify(d.state || {}), 'private', now, now);
+      return sendJson(res, 200, { id, title: d.title || 'My Dashboard', owner_id: authUser.id, created_at: now, updated_at: now });
     }
 
     if (p.startsWith('/api/dashboards/')) {
@@ -731,71 +731,72 @@ const server = http.createServer(async (req, res) => {
       const row = db.prepare('SELECT * FROM dashboards WHERE id=?').get(id);
       if (!row) return sendJson(res, 404, { error: 'Dashboard not found' });
       const isOwner = row.owner_id === authUser.id;
-      const isShared = row.visibility === 'shared';
-      const isGranted = !!db.prepare('SELECT 1 FROM dashboard_grants WHERE dashboard_id=? AND user_id=?').get(id, authUser.id);
-      let mayView = isOwner || isAdminUser || isShared || isGranted;
-      if (!mayView) mayView = hasWidgetAccess(authUser.id, safeParse(row.state_json));  // per-widget grants grant access
-      const mayEdit = isOwner || isAdminUser;      // dashboard-level edit; per-widget edit handled below
+      const dperm = (isOwner || isAdminUser) ? 'edit' : dashboardPermFor(id, authUser.id);   // 'view' | 'edit' | null
+      const mayView = !!dperm;
+      const mayEdit = isOwner || isAdminUser || dperm === 'edit';
 
       /* --- base dashboard resource --- */
       if (!action && m === 'GET') {
-        if (!mayView) return sendJson(res, 403, { error: 'You do not have access to this dashboard' });
-        const stateObj = filterStateForUser(safeParse(row.state_json), authUser, row.owner_id);   // per-user widget filtering + _perm tags
-        return sendJson(res, 200, { id: row.id, title: row.title, state: stateObj, owner_id: row.owner_id, visibility: row.visibility, share_token: (isOwner || isAdminUser) ? row.share_token : undefined, canEdit: mayEdit, updated_at: row.updated_at });
+        if (!mayView) return sendJson(res, 403, { error: 'Forbidden' });
+        const st = safeParse(row.state_json);
+        const cap = mayEdit ? 'edit' : 'view';
+        (st.views || []).forEach(v => (v.widgets || []).forEach(w => { w._perm = cap; }));   // per-dashboard capability
+        return sendJson(res, 200, { id: row.id, title: row.title, state: st, owner_id: row.owner_id, share_token: (isOwner || isAdminUser) ? row.share_token : undefined, canEdit: mayEdit, updated_at: row.updated_at });
       }
       if (!action && m === 'PUT') {
-        if (!mayEdit || !canEditAcct(authUser)) return sendJson(res, 403, { error: 'Forbidden' });
+        if (!mayEdit) return sendJson(res, 403, { error: 'Forbidden' });
         const d = await readBody(req);
         const title = d.title !== undefined ? String(d.title) : row.title;
         const stateJson = d.state !== undefined ? JSON.stringify(d.state) : row.state_json;
-        let vis = row.visibility;
-        if (d.visibility !== undefined) vis = d.visibility === 'shared' ? 'shared' : 'private';
         const now = Date.now();
-        db.prepare('UPDATE dashboards SET title=?, state_json=?, visibility=?, updated_at=? WHERE id=?').run(title, stateJson, vis, now, id);
-        return sendJson(res, 200, { ok: true, id, visibility: vis, updated_at: now });
+        db.prepare('UPDATE dashboards SET title=?, state_json=?, updated_at=? WHERE id=?').run(title, stateJson, now, id);
+        return sendJson(res, 200, { ok: true, id, updated_at: now });
       }
       if (!action && m === 'DELETE') {
-        if (!mayEdit) return sendJson(res, 403, { error: 'Only the owner or an admin can delete this dashboard' });
+        if (!(isOwner || isAdminUser)) return sendJson(res, 403, { error: 'Forbidden' });
         db.prepare('DELETE FROM dashboards WHERE id=?').run(id);
-        db.prepare('DELETE FROM dashboard_grants WHERE dashboard_id=?').run(id);
+        db.prepare('DELETE FROM dashboard_permissions WHERE dashboard_id=?').run(id);
         return sendJson(res, 200, { ok: true });
       }
 
-      /* --- share link (owner/admin) --- */
+      /* --- public share link (owner/admin/edit) --- */
       if (action === 'share') {
-        if (!mayEdit) return sendJson(res, 403, { error: 'Only the owner or an admin can share' });
-        if (m === 'POST') {                        // create/rotate a public read-only link
+        if (!mayEdit) return sendJson(res, 403, { error: 'Forbidden' });
+        if (m === 'POST') {
           const token = 'shr_' + crypto.randomBytes(12).toString('hex');
           db.prepare('UPDATE dashboards SET share_token=? WHERE id=?').run(token, id);
           return sendJson(res, 200, { share_token: token });
         }
-        if (m === 'DELETE') {                       // revoke
-          db.prepare('UPDATE dashboards SET share_token=NULL WHERE id=?').run(id);
-          return sendJson(res, 200, { ok: true });
-        }
+        if (m === 'DELETE') { db.prepare('UPDATE dashboards SET share_token=NULL WHERE id=?').run(id); return sendJson(res, 200, { ok: true }); }
       }
 
-      /* --- per-user read-only grants (owner/admin) --- */
-      if (action === 'grants') {
-        if (!mayEdit) return sendJson(res, 403, { error: 'Only the owner or an admin can manage access' });
+      /* --- per-user permissions ON THIS dashboard (owner/admin) --- */
+      if (action === 'permissions') {
+        if (!(isOwner || isAdminUser)) return sendJson(res, 403, { error: 'Forbidden' });
         if (m === 'GET') {
-          const ids = db.prepare('SELECT user_id FROM dashboard_grants WHERE dashboard_id=?').all(id).map(r => r.user_id);
-          return sendJson(res, 200, { user_ids: ids });
+          const users = db.prepare("SELECT id,name,email FROM app_users WHERE account_type IS NULL OR account_type <> 'admin'").all()
+            .filter(u => u.id !== row.owner_id);
+          const pm = {}; db.prepare('SELECT user_id,permission FROM dashboard_permissions WHERE dashboard_id=?').all(id).forEach(r => { pm[r.user_id] = r.permission; });
+          return sendJson(res, 200, { users: users.map(u => ({ ...u, permission: pm[u.id] || 'none' })) });
         }
         if (m === 'POST') {
-          const { user_id, granted } = await readBody(req);
-          if (granted) db.prepare('INSERT OR IGNORE INTO dashboard_grants (dashboard_id,user_id) VALUES (?,?)').run(id, Number(user_id));
-          else db.prepare('DELETE FROM dashboard_grants WHERE dashboard_id=? AND user_id=?').run(id, Number(user_id));
+          const { user_id, permission } = await readBody(req);
+          const before = dashboardPermFor(id, Number(user_id));
+          if (permission === 'view' || permission === 'edit') {
+            db.prepare(`INSERT INTO dashboard_permissions (dashboard_id,user_id,permission) VALUES (?,?,?)
+                        ON CONFLICT(dashboard_id,user_id) DO UPDATE SET permission=excluded.permission`).run(id, Number(user_id), permission);
+            if (before !== permission) notify(Number(user_id), `You were given ${permission} access to the dashboard “${row.title}”`, id);
+          } else {
+            db.prepare('DELETE FROM dashboard_permissions WHERE dashboard_id=? AND user_id=?').run(id, Number(user_id));
+          }
           return sendJson(res, 200, { ok: true });
         }
       }
 
-      /* --- single-widget edit/delete: owner/admin OR a user granted 'edit' --- */
+      /* --- single-widget edit/delete (owner/admin/edit) --- */
       if (action === 'widgets') {
         const wid = decodeURIComponent(parts[5] || '');
-        // owner/admin, or a user whose per-graph permission on this widget is 'editor'
-        const canEditWidget = mayEdit || userWidgetPermMap(authUser.id)[wid] === 'editor';
-        if (!canEditWidget) return sendJson(res, 403, { error: 'Forbidden' });
+        if (!mayEdit) return sendJson(res, 403, { error: 'Forbidden' });
         const state = safeParse(row.state_json);
         let found = null, ownerView = null;
         for (const v of (state.views || [])) { const w = (v.widgets || []).find(x => x.id === wid); if (w) { found = w; ownerView = v; break; } }

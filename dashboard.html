@@ -833,7 +833,9 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <div class="tb-group tb-left">
     <div class="tb-logo">N</div>
     <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" readonly title="Dashboard name (read-only)">
-    <select class="dash-picker" id="dashPicker" title="Switch dashboard" style="display:none"></select>
+    <select class="dash-picker" id="dashPicker" title="Switch dashboard"></select>
+    <button class="btn ghost sm icon-only" id="newDashBtn" title="New dashboard">＋</button>
+    <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard">🗑</button>
     <span class="save-indicator saved" id="saveIndicator" title="Save status">✓ Saved</span>
   </div>
 
@@ -1088,7 +1090,10 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       <button class="btn sm primary" id="shareCreateBtn">Create link</button>
       <button class="btn sm" id="shareRevokeBtn">Revoke</button>
     </div>
-    <div class="bhint" style="margin-top:16px">Per-user graph access is managed by an admin in the Admin panel.</div>
+
+    <div class="bfield-label" style="margin:22px 0 8px">User access to this dashboard</div>
+    <div class="bhint" style="margin-bottom:10px">Grant each user <b>View</b> (read-only) or <b>Edit</b> access — or <b>No access</b>.</div>
+    <div id="shareUsers" class="admin-users"></div>
   </div>
 </div>
 
@@ -1099,7 +1104,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       <h2>Admin — users</h2>
       <button class="icon-btn" id="adminClose" title="Close">Close</button>
     </div>
-    <div class="bhint" style="margin-bottom:12px">Click a user to manage their role and per-graph permissions.</div>
+    <div class="bhint" style="margin-bottom:12px">All accounts. Grant access to a dashboard from that dashboard's 🔗 Share button (View / Edit per user).</div>
     <div id="adminUsers" class="admin-users"></div>
   </div>
 </div>
@@ -1182,9 +1187,9 @@ const API = {
   deleteDashboard(id) { return this._fetch('/api/dashboards/' + id, { method: 'DELETE' }); },
   shareDashboard(id) { return this._fetch('/api/dashboards/' + id + '/share', { method: 'POST' }); },
   unshareDashboard(id) { return this._fetch('/api/dashboards/' + id + '/share', { method: 'DELETE' }); },
-  listGrants(id) { return this._fetch('/api/dashboards/' + id + '/grants'); },
-  setGrant(id, user_id, granted) { return this._fetch('/api/dashboards/' + id + '/grants', { method: 'POST', body: JSON.stringify({ user_id, granted }) }); },
   sharedDashboard(token) { return this._fetch('/api/shared/' + token); },
+  dashboardPermissions(id) { return this._fetch('/api/dashboards/' + id + '/permissions'); },
+  setDashboardPermission(id, user_id, permission) { return this._fetch('/api/dashboards/' + id + '/permissions', { method: 'POST', body: JSON.stringify({ user_id, permission }) }); },
   listUsers() { return this._fetch('/api/users'); },
   connectDb(cs) { return this._fetch('/api/connect', { method: 'POST', body: JSON.stringify({ connectionString: cs }) }); },
   clearTable(table) { return this._fetch('/api/clear', { method: 'POST', body: JSON.stringify({ table }) }); },
@@ -1609,8 +1614,7 @@ function renderDashboardPicker() {
     const tag = d.mine === false ? (d.visibility === 'shared' ? ' (shared)' : ' (view-only)') : '';
     return `<option value="${d.id}" ${d.id === state.id ? 'selected' : ''}>${escapeHtml(d.title)}${tag}</option>`;
   }).join('');
-  // One dashboard per user — only show the switcher if others were shared with them.
-  sel.style.display = dashboardsList.length > 1 ? '' : 'none';
+  sel.style.display = dashboardsList.length ? '' : 'none';
 }
 
 /* =====================================================================
@@ -2938,6 +2942,30 @@ function openShare() {
   if (!canEditCurrent || !state.id) return toast('You can only share dashboards you own', true);
   $('#shareOverlay').classList.add('open');
   renderShareLink();
+  renderShareUsers();
+}
+async function renderShareUsers() {
+  const wrap = $('#shareUsers'); if (!wrap) return;
+  wrap.innerHTML = '<div class="bhint">Loading…</div>';
+  try {
+    const { users } = await API.dashboardPermissions(state.id);
+    if (!users.length) { wrap.innerHTML = '<div class="bhint">No other users to share with yet.</div>'; return; }
+    wrap.innerHTML = users.map(u => `
+      <div class="admin-row">
+        <div class="au-info"><div class="au-name">${escapeHtml(u.name || '(no name)')}</div><div class="au-email">${escapeHtml(u.email)}</div></div>
+        <select class="perm-select p-${u.permission}" data-uid="${u.id}">
+          <option value="none" ${u.permission === 'none' ? 'selected' : ''}>No access</option>
+          <option value="view" ${u.permission === 'view' ? 'selected' : ''}>View</option>
+          <option value="edit" ${u.permission === 'edit' ? 'selected' : ''}>Edit</option>
+        </select>
+      </div>`).join('');
+    wrap.querySelectorAll('select[data-uid]').forEach(sel => {
+      sel.onchange = async () => {
+        try { await API.setDashboardPermission(state.id, +sel.dataset.uid, sel.value); sel.className = 'perm-select p-' + sel.value; toast('Access updated'); }
+        catch (e) { toast('Failed: ' + e.message, true); }
+      };
+    });
+  } catch (e) { wrap.innerHTML = '<div class="bhint">Failed to load: ' + escapeHtml(e.message) + '</div>'; }
 }
 function closeShare() { $('#shareOverlay').classList.remove('open'); }
 function renderShareLink() {
@@ -2979,17 +3007,13 @@ async function renderAdminUsers() {
   const wrap = $('#adminUsers');
   if (!users.length) { wrap.innerHTML = '<div class="bhint">No user accounts yet.</div>'; return; }
   wrap.innerHTML = users.map(u => `
-    <div class="admin-row clickable" data-open="${u.id}">
+    <div class="admin-row">
       <div class="au-info">
         <div class="au-name">${escapeHtml(u.name || '(no name)')}</div>
         <div class="au-email">${escapeHtml(u.email)}</div>
       </div>
       <span class="au-lastactive" title="Last active">${lastActiveLabel(u.last_active)}</span>
-      <span class="au-chevron">›</span>
     </div>`).join('');
-  // click a user → per-graph permission modal
-  wrap.querySelectorAll('[data-open]').forEach(el =>
-    el.onclick = () => openUserPerms(adminUsersCache.find(u => u.id === +el.dataset.open)));
 }
 
 /* --- per-user detail modal: account permission + dynamic per-graph rows --- */
@@ -3202,8 +3226,10 @@ function init() {
     renderBdManualTable();
   };
   $('#dashTitle').onchange = saveState;
-  // Dashboard switcher (only visible if others were shared with the user)
+  // Dashboards: switch / new / delete
   $('#dashPicker').onchange = (e) => { if (e.target.value !== state.id) openDashboard(e.target.value); };
+  $('#newDashBtn').onclick = createDashboard;
+  $('#delDashBtn').onclick = deleteDashboard;
   $('#themeBtn').onclick = ()=>{
     const cur=document.documentElement.getAttribute('data-theme');
     const next=cur==='dark'?'light':'dark';
