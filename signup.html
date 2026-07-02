@@ -47,6 +47,7 @@ input:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(124,92,252,.2)
 .btn[disabled]{opacity:.6;cursor:default;}
 .msg{margin-top:14px;font-size:13px;min-height:18px;text-align:center;}
 .msg.err{color:var(--danger);} .msg.ok{color:var(--accent-2);}
+.msg a{color:var(--accent);font-weight:600;text-decoration:none;} .msg a:hover{text-decoration:underline;}
 .alt{margin-top:20px;text-align:center;font-size:13.5px;color:var(--text-dim);}
 .alt a{color:var(--accent);text-decoration:none;font-weight:600;}
 .alt a:hover{text-decoration:underline;}
@@ -96,6 +97,12 @@ form.addEventListener('submit', async (e) => {
       body: JSON.stringify({ name: nameEl.value.trim(), email: emailEl.value.trim(), password: passEl.value })
     });
     const body = await r.json().catch(() => ({}));
+    if (r.status === 409) {                 // email already registered
+      msg.className = 'msg err';
+      msg.innerHTML = 'You already have an account with this email. <a href="/login">Sign in instead →</a>';
+      btn.disabled = false; btn.textContent = 'Create account';
+      return;
+    }
     if (!r.ok) throw new Error(body.error || 'Signup failed');
     msg.className = 'msg ok'; msg.textContent = 'Account created — redirecting…';
     location.href = '/';
