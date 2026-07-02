@@ -1212,14 +1212,17 @@ function setBackendBadge(ok, engine) {
 }
 
 const CHART_TYPES = [
-  ['line','Line Chart'],['bar','Bar Chart'],['hbar','Horizontal Bar'],
-  ['stacked','Stacked Bar'],['area','Area Chart'],['pie','Pie Chart'],
-  ['donut','Donut Chart'],['scatter','Scatter Plot'],['bubble','Bubble Chart'],
-  ['heatmap','Heatmap'],['treemap','Treemap'],['gauge','Gauge'],
-  ['radar','Radar Chart'],['polarArea','Polar Area'],
-  ['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
+  ['line','Line Chart'],['spline','Spline (smooth)'],['step','Step Chart'],['sparkline','Sparkline'],
+  ['bar','Bar Chart'],['column','Column Chart'],['hbar','Horizontal Bar'],
+  ['stacked','Stacked Bar'],['hstacked','Horizontal Stacked'],['stacked100','100% Stacked Bar'],
+  ['area','Area Chart'],['stackedArea','Stacked Area'],
+  ['pie','Pie Chart'],['donut','Donut Chart'],['polarArea','Polar Area'],['radar','Radar Chart'],
+  ['scatter','Scatter Plot'],['bubble','Bubble Chart'],['lollipop','Lollipop'],
+  ['heatmap','Heatmap'],['treemap','Treemap'],
+  ['funnel','Funnel'],['pyramid','Pyramid'],['progress','Progress Bars'],
+  ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', bar:'📊', hbar:'📶', stacked:'🧱', area:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -1939,7 +1942,43 @@ function buildChartConfig(w, rows) {
     };
   }
 
-  // line / area / bar / hbar / stacked
+  // funnel / pyramid — single series sorted descending, horizontal bars
+  if (t==='funnel' || t==='pyramid') {
+    const agg = aggregate(rows, w.x, w.y, w.agg).sort((a,b)=> b[1]-a[1]);
+    return {
+      type:'bar',
+      data:{ labels: agg.map(a=>a[0]), datasets:[{ data:agg.map(a=>round(a[1])), backgroundColor:agg.map((_,i)=>colors[i%colors.length]), borderWidth:0, borderRadius:4 }] },
+      options: baseOpts({ indexAxis:'y', scales: axisOpts(), plugins:{ legend:{display:false}, ...legendC() } })
+    };
+  }
+
+  // progress bars — one rounded horizontal bar per category on a shared max
+  if (t==='progress') {
+    const agg = aggregate(rows, w.x, w.y, w.agg);
+    const max = Math.max(1, ...agg.map(a=>+a[1]||0));
+    const sc = axisOpts(); sc.x.max = max; sc.x.stacked = false; sc.y.stacked = false;
+    return {
+      type:'bar',
+      data:{ labels: agg.map(a=>a[0]), datasets:[{ data:agg.map(a=>round(a[1])), backgroundColor:agg.map((_,i)=>colors[i%colors.length]), borderRadius:20, borderWidth:0, barThickness:16 }] },
+      options: baseOpts({ indexAxis:'y', scales: sc, plugins:{ legend:{display:false} } })
+    };
+  }
+
+  // lollipop — thin bars with a dot on top (approximated with a bar + point overlay)
+  if (t==='lollipop') {
+    const agg = aggregate(rows, w.x, w.y, w.agg).sort((a,b)=> String(a[0])>String(b[0])?1:-1);
+    const vals = agg.map(a=>round(a[1]));
+    return {
+      type:'bar',
+      data:{ labels: agg.map(a=>a[0]), datasets:[
+        { type:'line', data:vals, borderColor:'transparent', pointRadius:6, pointHoverRadius:8, pointBackgroundColor:colors[0], pointBorderColor:colors[0], fill:false },
+        { type:'bar', data:vals, backgroundColor:colors[0], barThickness:3 }
+      ] },
+      options: baseOpts({ scales: axisOpts(), plugins:{ legend:{display:false} } })
+    };
+  }
+
+  // line / area / bar / hbar / stacked (+ column/spline/step/sparkline/stacked variants)
   let datasets, labels;
   if (grouped) {
     const groups = [...new Set(rows.map(r=>r[w.group]))];
@@ -1960,15 +1999,24 @@ function buildChartConfig(w, rows) {
     datasets = [ seriesStyle(w, { label: w.y, data: agg.map(a=>round(a[1])), color: colors[0], multi:colors }) ];
   }
 
-  const isH = t==='hbar';
-  const isStack = t==='stacked';
+  const lineTypes = ['line','area','spline','step','sparkline','stackedArea'];
+  const isLine = lineTypes.includes(t);
+  const isH = t==='hbar' || t==='hstacked';
+  const isStack = ['stacked','hstacked','stacked100','stackedArea'].includes(t);
+  const isSpark = t==='sparkline';
+
+  // 100% stacked — normalise each label's values to percentages across series
+  if (t==='stacked100') {
+    const totals = labels.map((_,i)=> datasets.reduce((s,ds)=> s+(+ds.data[i]||0), 0) || 1);
+    datasets.forEach(ds => ds.data = ds.data.map((v,i)=> round((+v||0)/totals[i]*100)));
+  }
   return {
-    type: (t==='line'||t==='area')?'line':'bar',
+    type: isLine ? 'line' : 'bar',
     data:{ labels, datasets },
     options: baseOpts({
       indexAxis: isH?'y':'x',
-      scales: stackScales(isStack),
-      plugins: legendC()
+      scales: isSpark ? { x:{display:false}, y:{display:false} } : stackScales(isStack),
+      plugins: isSpark ? { legend:{display:false} } : legendC()
     })
   };
 }
@@ -1980,9 +2028,14 @@ function stackScales(stack){
 }
 function seriesStyle(w, {label, data, color, multi}) {
   const t = w.type;
-  if (t==='line') return { label, data, borderColor:color, backgroundColor:color+'33', tension:.35, pointRadius:2, pointHoverRadius:5, fill:false };
-  if (t==='area') return { label, data, borderColor:color, backgroundColor:color+'44', tension:.35, pointRadius:0, fill:true };
-  // bar family — color each bar for single series
+  if (['line','spline','step','sparkline'].includes(t)) {
+    const s = { label, data, borderColor:color, backgroundColor:color+'33', pointHoverRadius:5, fill:false,
+                pointRadius: t==='sparkline' ? 0 : 2, borderWidth: t==='sparkline' ? 2 : 3 };
+    if (t==='spline') s.tension = 0.5; else if (t==='step') s.stepped = true; else s.tension = .35;
+    return s;
+  }
+  if (t==='area' || t==='stackedArea') return { label, data, borderColor:color, backgroundColor:color+'55', tension:.35, pointRadius:0, fill:true };
+  // bar family (bar/column/hbar/stacked/hstacked/stacked100) — color each bar for single series
   const bg = (multi && !w.group) ? data.map((_,i)=>multi[i%multi.length]) : color;
   return { label, data, backgroundColor:bg, borderColor:color, borderWidth:0, borderRadius:4 };
 }
