@@ -1172,6 +1172,7 @@ const API = {
   adminUsers() { return this._fetch('/api/admin/users'); },
   adminSetPermission(id, permission) { return this._fetch('/api/admin/users/' + id + '/permission', { method: 'PATCH', body: JSON.stringify({ permission }) }); },
   adminWidgets() { return this._fetch('/api/admin/widgets'); },
+  adminUserDashboards(id) { return this._fetch('/api/admin/users/' + id + '/dashboards'); },
   adminPermissions(userId) { return this._fetch('/api/admin/permissions?user_id=' + userId); },
   adminSavePermissions(userId, permissions) { return this._fetch('/api/admin/users/' + userId + '/permissions', { method: 'PATCH', body: JSON.stringify({ permissions }) }); },
   updateWidget(dashId, wid, widget) { return this._fetch('/api/dashboards/' + dashId + '/widgets/' + wid, { method: 'PUT', body: JSON.stringify({ widget }) }); },
@@ -2865,11 +2866,9 @@ function applyAccountUI() {
   const canEdit = isEditorAcct();
   document.body.dataset.account = currentUser ? currentUser.account_type : 'user';
   document.body.dataset.permission = (currentUser && currentUser.permission) || '';
-  if (!admin) $('#adminBtn')?.remove();
+  if (!admin) { $('#adminBtn')?.remove(); $('#shareBtn')?.remove(); }   // only the admin manages sharing
   if (!canEdit) {
-    // (No pure-viewer accounts in the one-dashboard-per-user model, but keep
-    // this guard: strip creation/data-source controls if a user can't edit.)
-    ['#newGraphBtn','#openConnectBtn','#shareBtn','#saveIndicator'].forEach(sel => $(sel)?.remove());
+    ['#newGraphBtn','#openConnectBtn','#saveIndicator'].forEach(sel => $(sel)?.remove());
   }
 }
 
@@ -3060,13 +3059,43 @@ async function renderAdminUsers() {
   const wrap = $('#adminUsers');
   if (!users.length) { wrap.innerHTML = '<div class="bhint">No user accounts yet.</div>'; return; }
   wrap.innerHTML = users.map(u => `
-    <div class="admin-row">
+    <div class="admin-row clickable" data-open="${u.id}">
       <div class="au-info">
         <div class="au-name">${escapeHtml(u.name || '(no name)')}</div>
         <div class="au-email">${escapeHtml(u.email)}</div>
       </div>
       <span class="au-lastactive" title="Last active">${lastActiveLabel(u.last_active)}</span>
+      <span class="au-chevron">›</span>
     </div>`).join('');
+  wrap.querySelectorAll('[data-open]').forEach(el =>
+    el.onclick = () => openAdminUserSpace(adminUsersCache.find(u => u.id === +el.dataset.open)));
+}
+
+// Admin enters a user's space: lists all dashboards that user created.
+async function openAdminUserSpace(u) {
+  if (!u) return;
+  const wrap = $('#adminUsers');
+  wrap.innerHTML = '<div class="bhint">Loading…</div>';
+  try {
+    const { dashboards } = await API.adminUserDashboards(u.id);
+    const list = dashboards.length
+      ? dashboards.map(d => `<div class="admin-row clickable" data-dash="${d.id}">
+          <div class="au-info"><div class="au-name">${escapeHtml(d.title)}</div><div class="au-email">updated ${lastActiveLabel(d.updated_at)}</div></div>
+          <span class="au-chevron">open ›</span></div>`).join('')
+      : '<div class="bhint">This user has no dashboards yet.</div>';
+    wrap.innerHTML =
+      `<button class="btn sm" id="adminBack" style="margin-bottom:12px">‹ Back to users</button>
+       <div class="bfield-label" style="margin-bottom:8px">${escapeHtml(u.name || u.email)}'s dashboards</div>
+       ${list}`;
+    $('#adminBack').onclick = renderAdminUsers;
+    wrap.querySelectorAll('[data-dash]').forEach(el => el.onclick = async () => {
+      closeAdmin();
+      if (!dashboardsList.some(d => d.id === el.dataset.dash)) {
+        try { const { dashboards: dl } = await API.listDashboards(); dashboardsList = dl || []; renderDashboardPicker(); } catch (e) {}
+      }
+      openDashboard(el.dataset.dash);
+    });
+  } catch (e) { wrap.innerHTML = '<div class="bhint">Failed: ' + escapeHtml(e.message) + '</div>'; }
 }
 
 /* --- per-user detail modal: account permission + dynamic per-graph rows --- */

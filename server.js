@@ -565,6 +565,13 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/admin/users' && m === 'GET')
         return sendJson(res, 200, { users: db.prepare("SELECT id,email,name,permission,last_active,created_at FROM app_users WHERE account_type IS NULL OR account_type <> 'admin' ORDER BY created_at").all() });
 
+      // Dashboards created by a specific user (admin enters that user's space).
+      if (p.match(/^\/api\/admin\/users\/\d+\/dashboards$/) && m === 'GET') {
+        const uid = Number(p.split('/')[4]);
+        const rows = db.prepare('SELECT id,title,owner_id,updated_at FROM dashboards WHERE owner_id=? ORDER BY updated_at DESC').all(uid);
+        return sendJson(res, 200, { dashboards: rows });
+      }
+
       // Set a user's permission (viewer|editor). Admins cannot be edited here.
       if (p.match(/^\/api\/admin\/users\/\d+\/permission$/) && m === 'PATCH') {
         const uid = Number(p.split('/')[4]);
@@ -759,9 +766,9 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true });
       }
 
-      /* --- public share link (owner/admin/edit) --- */
+      /* --- public share link (ADMIN ONLY — only the admin manages sharing) --- */
       if (action === 'share') {
-        if (!mayEdit) return sendJson(res, 403, { error: 'Forbidden' });
+        if (!requireAdmin(authUser, res)) return;
         if (m === 'POST') {
           const token = 'shr_' + crypto.randomBytes(12).toString('hex');
           db.prepare('UPDATE dashboards SET share_token=? WHERE id=?').run(token, id);
@@ -770,9 +777,9 @@ const server = http.createServer(async (req, res) => {
         if (m === 'DELETE') { db.prepare('UPDATE dashboards SET share_token=NULL WHERE id=?').run(id); return sendJson(res, 200, { ok: true }); }
       }
 
-      /* --- per-user permissions ON THIS dashboard (owner/admin) --- */
+      /* --- per-user permissions ON THIS dashboard (ADMIN ONLY) --- */
       if (action === 'permissions') {
-        if (!(isOwner || isAdminUser)) return sendJson(res, 403, { error: 'Forbidden' });
+        if (!requireAdmin(authUser, res)) return;
         if (m === 'GET') {
           const users = db.prepare("SELECT id,name,email FROM app_users WHERE account_type IS NULL OR account_type <> 'admin'").all()
             .filter(u => u.id !== row.owner_id);
