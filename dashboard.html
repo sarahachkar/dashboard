@@ -2480,14 +2480,13 @@ function initBdataToggle() {
 /* ── Mini DS tabs inside builder ── */
 function initBdsTabs() {
   $$('.bds-tab').forEach(tab => {
-    tab.onclick = () => {
-      $$('.bds-tab').forEach(t => t.classList.remove('active'));
-      $$('.bds-pane').forEach(p => p.classList.remove('active'));
-      tab.classList.add('active');
-      const pane = $('#bdPane-' + tab.dataset.bpane);
-      if (pane) pane.classList.add('active');
-    };
+    tab.onclick = () => activateBdsTab(tab.dataset.bpane);
   });
+}
+function activateBdsTab(name) {
+  $$('.bds-tab').forEach(t => t.classList.toggle('active', t.dataset.bpane === name));
+  $$('.bds-pane').forEach(p => p.classList.remove('active'));
+  $('#bdPane-' + name)?.classList.add('active');
 }
 
 /* ── Populate browse table selector inside builder ── */
@@ -2690,7 +2689,14 @@ function openBuilder(existing, presetType) {
     if (builderDataset) {
       badge.textContent = `${builderDataset.rows.length} rows · ${builderDataset.columns.length} cols`;
       badge.className = 'bdata-badge';
-      $('#bdataSection').classList.remove('open'); // pre-collapsed if data already present
+      // Editing a widget with data: keep the panel OPEN so you SEE what you entered.
+      // For manually-entered widgets, jump to the Manual tab (its grid is restored).
+      if (existing) {
+        $('#bdataSection').classList.add('open');
+        if (bdManualModel) activateBdsTab('manual');
+      } else {
+        $('#bdataSection').classList.remove('open');
+      }
     } else {
       badge.textContent = 'No data';
       badge.className = 'bdata-badge none';
