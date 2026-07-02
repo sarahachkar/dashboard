@@ -1594,15 +1594,22 @@ function saveState() {
   if (!state.id) return;                 // dashboard not created yet
   setSaveIndicator('unsaved');
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    setSaveIndicator('saving');
-    try {
-      await API.updateDashboard(state.id, state.title, serializeState());
-      const item = dashboardsList.find(d => d.id === state.id);
-      if (item && item.title !== state.title) { item.title = state.title; renderDashboardPicker(); }
-      setSaveIndicator('saved');
-    } catch (e) { setSaveIndicator('unsaved'); console.warn('save failed', e.message); }
-  }, 700);
+  saveTimer = setTimeout(saveStateNow, 700);
+}
+// Persist immediately (no debounce) — used after adding/editing a widget so a
+// quick refresh can never drop the change.
+async function saveStateNow() {
+  clearTimeout(saveTimer);
+  state.title = $('#dashTitle').value;
+  state.activeView = activeView;
+  if (!state.id) return;
+  setSaveIndicator('saving');
+  try {
+    await API.updateDashboard(state.id, state.title, serializeState());
+    const item = dashboardsList.find(d => d.id === state.id);
+    if (item && item.title !== state.title) { item.title = state.title; renderDashboardPicker(); }
+    setSaveIndicator('saved');
+  } catch (e) { setSaveIndicator('unsaved'); console.warn('save failed', e.message); }
 }
 
 async function loadDashboards() {
@@ -2649,8 +2656,9 @@ function openBuilder(existing, presetType) {
   else if (!requireEdit()) return;
   const ds = dataset.rows.length ? dataset : null;
   builderTarget = existing ? existing.id : null;
-  // If widget has its own saved dataset, restore it
-  builderDataset = existing?.savedDataset ? existing.savedDataset : ds;
+  // Editing: restore this widget's own data (or the global one for legacy widgets).
+  // NEW graph: start EMPTY & independent — never inherit the previous graph's data.
+  builderDataset = existing ? (existing.savedDataset || ds) : null;
   builderConnId = existing?.connectionId || null;
   // Restore the Manual grid ONLY when the data was entered manually (no
   // connection / query source) — connection/query widgets keep the blank template.
@@ -2665,9 +2673,9 @@ function openBuilder(existing, presetType) {
   }
   refreshBdConnSelect();   // reflect currently-connected databases
 
-  const cols = builderDataset ? builderDataset.columns : (ds ? ds.columns : []);
-  const cats = cols.filter(c => { const vs = (builderDataset||ds||{rows:[]}).rows.map(r=>r[c]).filter(v=>v!=null); return vs.length && !vs.every(v=>typeof v==='number'); });
-  const nums = cols.filter(c => { const vs = (builderDataset||ds||{rows:[]}).rows.map(r=>r[c]).filter(v=>v!=null); return vs.every(v=>typeof v==='number'); });
+  const cols = builderDataset ? builderDataset.columns : [];   // new graph → no columns until data is loaded
+  const cats = cols.filter(c => { const vs = (builderDataset||{rows:[]}).rows.map(r=>r[c]).filter(v=>v!=null); return vs.length && !vs.every(v=>typeof v==='number'); });
+  const nums = cols.filter(c => { const vs = (builderDataset||{rows:[]}).rows.map(r=>r[c]).filter(v=>v!=null); return vs.every(v=>typeof v==='number'); });
 
   builderDraft = existing
     ? { ...existing }
@@ -2846,11 +2854,11 @@ function saveBuilder() {
         .catch(e => toast('Save failed: ' + e.message, true));
       closeBuilder(); renderGrid();
     } else {
-      closeBuilder(); renderGrid(); saveState();
+      closeBuilder(); renderGrid(); saveStateNow();   // persist immediately (no debounce race)
     }
   } else {
     widgets().push(d);
-    closeBuilder(); renderGrid(); saveState();
+    closeBuilder(); renderGrid(); saveStateNow();      // persist the new widget immediately
     const el = document.querySelector(`.widget[data-id="${d.id}"]`);
     if (el) {
       el.classList.add('card-enter');
