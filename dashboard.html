@@ -12,6 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --bg: #0a0d1a;
@@ -1034,7 +1035,11 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 
         <!-- Manual pane -->
         <div class="bds-pane" id="bdPane-manual">
-          <div class="bhint" style="margin:0 0 8px">Type your data below. Click a header to rename a column. Use the buttons to add rows or columns, then <b>Load</b>.</div>
+          <div class="bhint" style="margin:0 0 8px">Type your data below, or <b>upload an Excel / CSV file</b>. Click a header to rename a column, then <b>Load</b>.</div>
+          <div style="margin:0 0 8px">
+            <label class="btn sm" for="bdFileInput" style="cursor:pointer">⬆ Upload Excel / CSV</label>
+            <input type="file" id="bdFileInput" accept=".xlsx,.xls,.csv" style="display:none">
+          </div>
           <div class="manual-wrap" style="max-height:200px"><table class="manual" id="bdManualTable"></table></div>
           <div class="manual-actions" style="margin-top:8px;gap:8px">
             <button class="btn sm" id="bdAddRow" type="button">+ Row</button>
@@ -2546,6 +2551,29 @@ async function bdQueryRun() {
   } catch(e) { setBdStatus('bdQueryStatus', '✖ ' + e.message, true); }
 }
 
+/* ── Import an Excel (.xlsx/.xls) or CSV file into the manual grid ── */
+function bdImportFile(file) {
+  if (!file) return;
+  if (typeof XLSX === 'undefined') { setBdStatus('bdMStatus', 'Spreadsheet library failed to load — check your connection', true); return; }
+  setBdStatus('bdMStatus', 'Reading “' + file.name + '”…', false);
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });          // works for xlsx, xls AND csv
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, defval: '' });
+      if (!aoa.length) { setBdStatus('bdMStatus', 'That sheet is empty', true); return; }
+      const columns = aoa[0].map((c, i) => String(c === '' || c == null ? 'col' + (i + 1) : c).trim());
+      const rows = aoa.slice(1).map(r => columns.map((_, i) => r[i] ?? ''));
+      bdManualModel = { columns, rows };
+      renderBdManualTable();
+      setBdStatus('bdMStatus', `✓ Imported ${rows.length} rows × ${columns.length} cols — review, then click Load`, false);
+    } catch (err) { setBdStatus('bdMStatus', 'Import failed: ' + err.message, true); }
+  };
+  reader.onerror = () => setBdStatus('bdMStatus', 'Could not read that file', true);
+  reader.readAsArrayBuffer(file);
+}
+
 /* ── Manual load inside builder ── */
 function bdManualLoad() {
   if (!bdManualModel || !bdManualModel.columns.length) return;
@@ -2624,7 +2652,11 @@ function openBuilder(existing, presetType) {
   // If widget has its own saved dataset, restore it
   builderDataset = existing?.savedDataset ? existing.savedDataset : ds;
   builderConnId = existing?.connectionId || null;
-  bdManualModel = null;
+  // Restore the Manual grid from the widget's saved data so re-editing keeps it visible.
+  const sd0 = existing?.savedDataset;
+  bdManualModel = (sd0 && sd0.columns && sd0.columns.length)
+    ? { columns: sd0.columns.slice(), rows: (sd0.rows || []).map(r => sd0.columns.map(c => r[c])) }
+    : null;
   refreshBdConnSelect();   // reflect currently-connected databases
 
   const cols = builderDataset ? builderDataset.columns : (ds ? ds.columns : []);
@@ -3514,6 +3546,7 @@ function init() {
   $('#bdBrRun').onclick = bdBrowseLoad;
   $('#bdQueryRun').onclick = bdQueryRun;
   $('#bdMLoad').onclick = bdManualLoad;
+  $('#bdFileInput').onchange = (e) => { bdImportFile(e.target.files[0]); e.target.value = ''; };
   $('#bdAddRow').onclick = () => {
     if (!bdManualModel) renderBdManualTable();
     bdManualModel.rows.push(bdManualModel.columns.map(() => ''));
