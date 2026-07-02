@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Nexus Analytics — Dashboard</title>
+<!-- Apply the personal theme BEFORE first paint so refresh never flashes/animates a color change -->
+<script>try{document.documentElement.setAttribute('data-theme', localStorage.getItem('nexus_theme') || 'light');}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -1621,20 +1623,29 @@ async function openDashboard(id) {
 }
 
 async function createDashboard() {
-  const created = await API.createDashboard('New dashboard', { views: [{ name: 'Overview', widgets: [] }], activeView: 0, theme: state.theme });
-  dashboardsList.unshift(created);
-  await openDashboard(created.id);
-  toast('Dashboard created');
+  try {
+    const created = await API.createDashboard('New dashboard', { views: [{ name: 'Overview', widgets: [] }], activeView: 0 });
+    const { dashboards } = await API.listDashboards();   // reload so `mine` flags are correct
+    dashboardsList = dashboards || [];
+    await openDashboard(created.id);
+    renderDashboardPicker();
+    toast('Dashboard created');
+  } catch (e) { toast('Create failed: ' + e.message, true); }
 }
 
 async function deleteDashboard() {
-  if (dashboardsList.length <= 1) return toast('Keep at least one dashboard', true);
+  if (!state.id) return;
+  // only the owner (or admin) can delete — reflect the backend rule in the UI
+  const cur = dashboardsList.find(d => d.id === state.id);
+  if (cur && cur.mine === false && !isAdmin()) return toast('You can only delete your own dashboards', true);
   if (!confirm(`Delete dashboard "${state.title}"? This cannot be undone.`)) return;
-  const id = state.id;
   try {
-    await API.deleteDashboard(id);
-    dashboardsList = dashboardsList.filter(d => d.id !== id);
-    await openDashboard(dashboardsList[0].id);
+    await API.deleteDashboard(state.id);
+    const { dashboards } = await API.listDashboards();   // authoritative refresh
+    dashboardsList = dashboards || [];
+    renderDashboardPicker();
+    if (dashboardsList.length) await openDashboard(dashboardsList[0].id);
+    else await createDashboard();                          // never leave the user with none
     toast('Dashboard deleted');
   } catch (e) { toast('Delete failed: ' + e.message, true); }
 }
