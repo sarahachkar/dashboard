@@ -2296,14 +2296,22 @@ function stackScales(stack){
 // Conditional coloring — first matching rule wins, else the default color.
 function colorForValue(value, thresholds, defaultColor) {
   const v = +value;
+  // Find EVERY rule that matches, then pick the tightest one (boundary closest
+  // to the value) so rule order never causes a broad rule to mask a specific one
+  // — e.g. with ">50→green" and ">100→red", a value of 150 correctly gets red.
+  let best = null, bestDist = Infinity;
   for (const rule of thresholds || []) {
-    if (rule.op === 'lt'  && v <  rule.value) return rule.color;
-    if (rule.op === 'lte' && v <= rule.value) return rule.color;
-    if (rule.op === 'gt'  && v >  rule.value) return rule.color;
-    if (rule.op === 'gte' && v >= rule.value) return rule.color;
-    if (rule.op === 'between' && Array.isArray(rule.value) && v >= rule.value[0] && v <= rule.value[1]) return rule.color;
+    let matches = false, dist = Infinity;
+    if (rule.op === 'lt'  && v <  rule.value) { matches = true; dist = rule.value - v; }
+    else if (rule.op === 'lte' && v <= rule.value) { matches = true; dist = rule.value - v; }
+    else if (rule.op === 'gt'  && v >  rule.value) { matches = true; dist = v - rule.value; }
+    else if (rule.op === 'gte' && v >= rule.value) { matches = true; dist = v - rule.value; }
+    else if (rule.op === 'between' && Array.isArray(rule.value) && v >= rule.value[0] && v <= rule.value[1]) {
+      matches = true; dist = Math.min(v - rule.value[0], rule.value[1] - v);
+    }
+    if (matches && dist < bestDist) { best = rule.color; bestDist = dist; }
   }
-  return defaultColor;
+  return best != null ? best : defaultColor;
 }
 function seriesStyle(w, {label, data, color, multi}) {
   const t = w.type;
