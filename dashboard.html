@@ -948,6 +948,12 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
         <label>Date Field</label>
         <select class="input" id="dateCol"></select>
       </div>
+      <div class="field searchbox" id="graphSearchField" style="flex:0 0 220px;max-width:220px">
+        <label>Find Graph</label>
+        <div class="search-input-wrap">
+          <input class="input" id="graphSearch" placeholder="Filter graphs by name…">
+        </div>
+      </div>
       <div class="field searchbox" style="flex:1">
         <label>Global Search / Highlight</label>
         <div class="search-input-wrap">
@@ -1803,6 +1809,28 @@ function renderGrid() {
   }
   ws.forEach((w, i) => grid.appendChild(buildWidget(w, i)));
   ws.forEach(w => renderWidgetBody(w));
+  filterGraphs();   // re-apply the "find graph" filter after a rebuild
+}
+
+// Show only widgets whose title matches the "Find graph" box.
+function filterGraphs() {
+  const inp = $('#graphSearch'); if (!inp) return;
+  const q = inp.value.trim().toLowerCase();
+  let shown = 0;
+  widgets().forEach(w => {
+    const el = document.querySelector(`.widget[data-id="${w.id}"]`);
+    if (!el) return;
+    const match = !q || (w.title || '').toLowerCase().includes(q);
+    el.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  // optional "no match" note
+  const grid = $('#grid'); if (!grid) return;
+  let note = grid.querySelector('.graph-filter-empty');
+  if (q && shown === 0 && widgets().length) {
+    if (!note) { note = document.createElement('div'); note.className = 'empty-canvas graph-filter-empty'; grid.appendChild(note); }
+    note.textContent = `No graphs match “${inp.value}”.`;
+  } else if (note) note.remove();
 }
 
 let _widgetIdx = 0;
@@ -2439,8 +2467,9 @@ async function renderWorldMap(w, container, rows) {
   holder.className = 'chart-holder map-holder';
   if (w.heightPx) holder.style.height = w.heightPx + 'px';
   else if (container.id === 'builderPreview') holder.style.height = '320px';
+  holder.innerHTML = '<div class="bpreview-empty">Loading world map…</div>';   // never blank while fetching
   container.appendChild(holder);
-  if (typeof d3 === 'undefined' || typeof topojson === 'undefined') { holder.innerHTML = '<div class="w-error">Map library not loaded — check your connection</div>'; return; }
+  if (typeof d3 === 'undefined' || typeof topojson === 'undefined') { holder.innerHTML = '<div class="w-error">Map library not loaded — the D3 / world-atlas CDN may be blocked. Check your connection.</div>'; return; }
   const countryCol = w.country || w.x, valueCol = w.y;
   if (!countryCol || !valueCol) { holder.innerHTML = '<div class="bpreview-empty">Pick a <b>Country column</b> and a <b>Value</b> column.</div>'; return; }
   // Aggregate the value by country (same aggregation system as every other chart)
@@ -2452,13 +2481,15 @@ async function renderWorldMap(w, container, rows) {
   let max = vals.length ? Math.max(...vals) : 1; if (max === min) max = min + 1;
   try {
     const world = await loadWorldAtlas();
-    const rect = holder.getBoundingClientRect();
-    const width = Math.max(200, Math.round(rect.width) || 600), height = Math.max(160, Math.round(rect.height) || 300);
     holder.innerHTML = '';
+    // Fixed internal size + viewBox so the SVG scales to the holder via CSS
+    // (avoids the "holder has 0px height at render time" blank-map problem).
+    const W = 960, H = 500;
     const svg = d3.select(holder).append('svg')
-      .attr('viewBox', `0 0 ${width} ${height}`).attr('preserveAspectRatio', 'xMidYMid meet')
+      .attr('viewBox', `0 0 ${W} ${H}`).attr('preserveAspectRatio', 'xMidYMid meet')
       .style('width', '100%').style('height', '100%').style('display', 'block');
-    const projection = d3.geoNaturalEarth1().fitSize([width, height], world);
+    const projFn = d3.geoNaturalEarth1 || d3.geoEqualEarth || d3.geoMercator;   // fallback if not in the d3 build
+    const projection = projFn().fitSize([W, H], world);
     const path = d3.geoPath(projection);
     const scale = d3.scaleSequential(d3.interpolateBlues).domain([min, max]);
     const neutral = (getComputedStyle(document.body).getPropertyValue('--panel-2').trim()) || '#e5e7eb';
@@ -3759,9 +3790,10 @@ function init() {
   // filters
   $('#timeRange').onchange = ()=>{ renderGrid(); };
   $('#dateCol').onchange = ()=>{ renderGrid(); };
-  $('#clearFilters').onclick = ()=>{ $('#timeRange').value='all'; $('#globalSearch').value=''; renderGrid(); };
+  $('#clearFilters').onclick = ()=>{ $('#timeRange').value='all'; $('#globalSearch').value=''; $('#graphSearch').value=''; renderGrid(); };
   let searchTimer;
   $('#globalSearch').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ renderGrid(); },180); };
+  $('#graphSearch').oninput = filterGraphs;   // filter which graphs are shown by title
 
   // apply the personal color scheme (per browser/account), once
   try { applyTheme(localStorage.getItem('nexus_theme') || 'light'); } catch (e) {}
