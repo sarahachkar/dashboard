@@ -542,6 +542,11 @@ select.input { cursor: pointer; }
 .map-holder svg { display: block; width: 100%; height: 100%; }
 .map-holder svg path { transition: opacity .15s; }
 .map-tooltip { position: absolute; z-index: 6; pointer-events: none; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px; line-height: 1.35; box-shadow: var(--shadow); white-space: nowrap; }
+.map-legend { position: absolute; left: 10px; bottom: 8px; z-index: 5; display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 5px 9px; font-size: 11px; color: var(--text-dim); box-shadow: var(--shadow); }
+.map-legend .ml-bar { width: 84px; height: 9px; border-radius: 5px; display: inline-block; }
+.map-legend .ml-lo, .map-legend .ml-hi { color: var(--text); font-weight: 600; }
+.map-legend .ml-nd { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--border); }
+.map-legend .ml-nd i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); }
 /* free drag-to-resize grip (bottom-right) */
 .resize-handle { position: absolute; right: 3px; bottom: 3px; width: 18px; height: 18px; cursor: nwse-resize; z-index: 4; color: var(--text-dim); opacity: .55; display: grid; place-items: end; }
 .resize-handle:hover { opacity: 1; color: var(--accent); }
@@ -2491,7 +2496,9 @@ async function renderWorldMap(w, container, rows) {
     const projFn = d3.geoNaturalEarth1 || d3.geoEqualEarth || d3.geoMercator;   // fallback if not in the d3 build
     const projection = projFn().fitSize([W, H], world);
     const path = d3.geoPath(projection);
-    const scale = d3.scaleSequential(d3.interpolateBlues).domain([min, max]);
+    // Shift the interpolator so even the MIN value is a clearly-visible blue
+    // (plain interpolateBlues(0) is almost white → low-value countries vanish).
+    const scale = d3.scaleSequential(t => d3.interpolateBlues(0.28 + 0.72 * t)).domain([min, max]);
     const neutral = (getComputedStyle(document.body).getPropertyValue('--panel-2').trim()) || '#e5e7eb';
     const tip = d3.select(holder).append('div').attr('class', 'map-tooltip').style('display', 'none');
     const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
@@ -2513,6 +2520,18 @@ async function renderWorldMap(w, container, rows) {
            .html(`<b>${escapeHtml(f.properties.name || '')}</b><br>${has ? escapeHtml(fmtNum(byName[nm])) : '<span style="opacity:.6">no data</span>'}`);
       })
       .on('mouseleave', () => tip.style('display', 'none'));
+    // Legend: gradient (min→max) + a "no data" swatch, so colors are readable.
+    if (vals.length) {
+      const grad = `linear-gradient(90deg, ${scale(min)}, ${scale((min+max)/2)}, ${scale(max)})`;
+      const legend = document.createElement('div');
+      legend.className = 'map-legend';
+      legend.innerHTML =
+        `<span class="ml-lo">${escapeHtml(fmtNum(min))}</span>` +
+        `<span class="ml-bar" style="background:${grad}"></span>` +
+        `<span class="ml-hi">${escapeHtml(fmtNum(max))}</span>` +
+        `<span class="ml-nd"><i style="background:${neutral}"></i>no data</span>`;
+      holder.appendChild(legend);
+    }
   } catch (e) {
     holder.innerHTML = `<div class="w-error">Map failed to load: ${escapeHtml(e.message)}</div>`;
   }
