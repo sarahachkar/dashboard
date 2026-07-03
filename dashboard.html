@@ -547,6 +547,12 @@ select.input { cursor: pointer; }
 .map-legend .ml-lo, .map-legend .ml-hi { color: var(--text); font-weight: 600; }
 .map-legend .ml-nd { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--border); }
 .map-legend .ml-nd i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); }
+.map-holder svg path.mp-selected { stroke: var(--accent); stroke-width: 1.8; }
+#mapFilterBar { margin: 0 0 12px; }
+.mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
+.mapfilter-chip .mf-x { cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 13px; line-height: 1; border: none; }
+.mapfilter-chip .mf-x:hover { filter: brightness(1.12); }
+.mapfilter-chip .mf-lbl { opacity: .75; font-weight: 500; }
 /* free drag-to-resize grip (bottom-right) */
 .resize-handle { position: absolute; right: 3px; bottom: 3px; width: 18px; height: 18px; cursor: nwse-resize; z-index: 4; color: var(--text-dim); opacity: .55; display: grid; place-items: end; }
 .resize-handle:hover { opacity: 1; color: var(--accent); }
@@ -971,6 +977,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       </div>
     </div>
 
+    <div id="mapFilterBar" style="display:none"></div>
     <div class="grid" id="grid"></div>
   </main>
 </div>
@@ -1495,6 +1502,42 @@ function dateCols(){ return dataset.columns.filter(c=>colType(c)==='date'); }
 /* =====================================================================
    Filtering (time range + active dataset)
    ===================================================================== */
+/* Cross-filter: the country currently clicked on a world map (canonical name),
+   or null. When set, every other widget narrows to rows for that country. */
+let mapSelection = null;
+const _countryColCache = new WeakMap();
+// Best guess at which column of a dataset holds country names/codes.
+function detectCountryColumn(ds) {
+  if (!ds || !ds.columns || !ds.rows) return null;
+  if (_countryColCache.has(ds)) return _countryColCache.get(ds);
+  let best = null, bestScore = 0.39;   // require ≥40% of sampled values to be real countries
+  for (const c of ds.columns) {
+    const uniq = [...new Set(ds.rows.map(r => r[c]).filter(v => v != null).map(v => String(v).trim().toLowerCase()))].slice(0, 80);
+    if (!uniq.length) continue;
+    let hit = 0; for (const v of uniq) if (COUNTRY_ALIAS[v]) hit++;
+    const score = hit / uniq.length;
+    if (score > bestScore) { bestScore = score; best = c; }
+  }
+  _countryColCache.set(ds, best);
+  return best;
+}
+// Which column a given widget should match the map selection against.
+function widgetCountryColumn(w, ds) {
+  if (w.linkCountry === '__none__') return null;      // explicitly opted out
+  if (w.linkCountry) return w.linkCountry;             // explicit column
+  if (w.type === 'worldmap') return w.country || w.x;  // maps use their own country col
+  return detectCountryColumn(ds);                      // auto-detect
+}
+// Update the "Filtered by <country>" chip above the grid.
+function renderMapFilterChip() {
+  const bar = $('#mapFilterBar'); if (!bar) return;
+  if (!mapSelection) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  bar.style.display = '';
+  bar.innerHTML = `<span class="mapfilter-chip"><span class="mf-lbl">🌍 Filtered by country:</span> ${escapeHtml(mapSelection)}
+    <button class="mf-x" title="Clear country filter" onclick="clearMapSelection()">✕</button></span>`;
+}
+function clearMapSelection() { mapSelection = null; renderGrid(); }
+
 function filteredRows() {
   let rows = dataset.rows;
   const dc = $('#dateCol').value;
@@ -1814,6 +1857,7 @@ function renderGrid() {
   }
   ws.forEach((w, i) => grid.appendChild(buildWidget(w, i)));
   ws.forEach(w => renderWidgetBody(w));
+  renderMapFilterChip();   // show/hide the "Filtered by country" chip
   filterGraphs();   // re-apply the "find graph" filter after a rebuild
 }
 
@@ -2042,7 +2086,15 @@ function renderWidgetBody(w) {
   const prevDs = dataset;
   if (w.savedDataset && w.savedDataset.rows.length) dataset = w.savedDataset;
 
-  const rows = filteredRows();
+  let rows = filteredRows();
+  // Cross-filter: when a country is selected on a world map, narrow every OTHER
+  // widget to that country's rows (the map itself keeps showing all countries).
+  if (mapSelection && w.type !== 'worldmap') {
+    const col = widgetCountryColumn(w, dataset);
+    if (col && dataset.columns.includes(col)) {
+      rows = rows.filter(r => countryToCanonical(r[col]) === mapSelection);
+    }
+  }
   const sub = $('#sub-'+w.id);
   if (sub) sub.textContent = widgetSubtitle(w, rows.length);
 
@@ -2504,6 +2556,8 @@ async function renderWorldMap(w, container, rows) {
     const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
     svg.append('g').selectAll('path').data(world.features).join('path')
       .attr('d', path)
+      .attr('class', f => countryToCanonical(f.properties.name) === mapSelection ? 'mp-selected' : null)
+      .style('cursor', 'pointer')
       .attr('fill', f => {
         const nm = (f.properties.name || '').toLowerCase();
         if (!(nm in byName)) return neutral;                       // no data → neutral gray
@@ -2517,9 +2571,15 @@ async function renderWorldMap(w, container, rows) {
         const nm = (f.properties.name || '').toLowerCase(), has = nm in byName;
         const r = holder.getBoundingClientRect();
         tip.style('display', 'block').style('left', (ev.clientX - r.left + 12) + 'px').style('top', (ev.clientY - r.top + 12) + 'px')
-           .html(`<b>${escapeHtml(f.properties.name || '')}</b><br>${has ? escapeHtml(fmtNum(byName[nm])) : '<span style="opacity:.6">no data</span>'}`);
+           .html(`<b>${escapeHtml(f.properties.name || '')}</b><br>${has ? escapeHtml(fmtNum(byName[nm])) : '<span style="opacity:.6">no data</span>'}`
+             + `<br><span style="opacity:.55;font-size:11px">click to filter other graphs</span>`);
       })
-      .on('mouseleave', () => tip.style('display', 'none'));
+      .on('mouseleave', () => tip.style('display', 'none'))
+      .on('click', function (ev, f) {
+        const nm = countryToCanonical(f.properties.name);
+        mapSelection = (mapSelection === nm) ? null : nm;   // click again to clear
+        renderGrid();                                       // re-render → linked graphs filter
+      });
     // Legend: gradient (min→max) + a "no data" swatch, so colors are readable.
     if (vals.length) {
       const grad = `linear-gradient(90deg, ${scale(min)}, ${scale((min+max)/2)}, ${scale(max)})`;
@@ -2947,6 +3007,16 @@ function renderBuilderForm() {
       <div class="bfield"><label>Aggregate</label><select class="binput" id="bAgg">${AGGREGATES.map(a => `<option value="${a}" ${a === d.agg ? 'selected' : ''}>${AGG_LABELS[a]}</option>`).join('')}</select></div>
     </div>`}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+    ${d.type !== 'worldmap' ? `
+    <div class="bfield">
+      <label>🌍 Link to world map</label>
+      <select class="binput" id="bLinkCountry">
+        <option value="" ${!d.linkCountry ? 'selected' : ''}>Auto-detect country column</option>
+        <option value="__none__" ${d.linkCountry === '__none__' ? 'selected' : ''}>Don't react to map clicks</option>
+        ${cols.map(c => `<option value="${escapeHtml(c)}" ${c === d.linkCountry ? 'selected' : ''}>Filter by column: ${escapeHtml(c)}</option>`).join('')}
+      </select>
+      <div class="bhint">When a country is clicked on a world map, this graph narrows to that country's rows.</div>
+    </div>` : ''}
     ${THRESHOLD_TYPES.includes(d.type) ? `
     <div class="bfield" id="bThresholdsField">
       <label>Conditional coloring</label>
@@ -2962,7 +3032,7 @@ function renderBuilderForm() {
     renderBuilderForm();   // re-render (threshold section visibility depends on type) + preview
   });
   const bind = (id, key) => { const el = $(id); if (el) el.onchange = () => { d[key] = el.value; builderPreview(); }; };
-  bind('#bX', 'x'); bind('#bY', 'y'); bind('#bGroup', 'group'); bind('#bAgg', 'agg'); bind('#bTheme', 'theme'); bind('#bCountry', 'country');
+  bind('#bX', 'x'); bind('#bY', 'y'); bind('#bGroup', 'group'); bind('#bAgg', 'agg'); bind('#bTheme', 'theme'); bind('#bCountry', 'country'); bind('#bLinkCountry', 'linkCountry');
   if (THRESHOLD_TYPES.includes(d.type)) {
     renderThresholdRows();
     $('#bAddThreshold').onclick = () => { d.thresholds = d.thresholds || []; d.thresholds.push({ op: 'lt', value: 0, color: '#e24b4a' }); renderThresholdRows(); builderPreview(); };
@@ -3083,6 +3153,7 @@ function saveBuilder() {
   }
 }
 window.openBuilder = openBuilder;
+window.clearMapSelection = clearMapSelection;
 
 /* =====================================================================
    Create a real table in the database (via backend /api/datasets)
