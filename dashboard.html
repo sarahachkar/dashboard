@@ -2727,7 +2727,11 @@ function closeBuilder() {
 function renderBuilderForm() {
   const d = builderDraft;
   const ds = activeBuilderDataset();
-  const cols = ds ? ds.columns : [];
+  let cols = ds ? ds.columns : [];
+  // Always show the choices the user already made — even if the data isn't
+  // (re)loaded, fall back to the widget's saved X/Y/Group columns so editing
+  // never looks blank / "from scratch".
+  if (!cols.length) cols = [...new Set([d.x, d.y, d.group].filter(Boolean))];
   const opt = (arr, sel) => arr.map(c => `<option ${c === sel ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
   const optBlank = (arr, sel) => `<option value="">— none —</option>` + arr.map(c => `<option ${c === sel ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
   updateBuilderHeading();
