@@ -2468,6 +2468,7 @@ let builderDraft = null;
 let builderChart = null;
 let builderDataset = null;  // dataset local to the builder (may differ from global)
 let builderConnId = null;   // which saved connection the builder's data came from ('' / null = built-in)
+let builderSource = null;   // remembers HOW the data was picked: browse table/cols/filter, or query text
 let bdManualModel = null;
 
 /* ── Toggle the data section open/closed ── */
@@ -2535,6 +2536,7 @@ async function bdBrowseLoad() {
     builderDataset = connId ? normalizeRows((await API.connQuery(connId, sql)).rows)
                             : (BACKEND ? normalizeRows((await API.query(sql)).rows) : runQuery(sql));
     builderConnId = connId || null;
+    builderSource = { tab: 'browse', table, columns: selCols, fCol, fOp, fVal };   // remember the selection
     setBdStatus('bdBrStatus', `✓ ${builderDataset.rows.length} rows loaded`, false);
     onBuilderDataLoaded();
   } catch(e) { setBdStatus('bdBrStatus', '✖ ' + e.message, true); }
@@ -2552,6 +2554,7 @@ async function bdQueryRun() {
     else res = BACKEND && /select|from/i.test(text) ? normalizeRows((await API.query(text)).rows) : runQuery(text);
     builderDataset = res;
     builderConnId = connId || null;
+    builderSource = { tab: 'query', query: text };   // remember the query text
     setBdStatus('bdQueryStatus', `✓ ${res.rows.length} rows loaded`, false);
     onBuilderDataLoaded();
   } catch(e) { setBdStatus('bdQueryStatus', '✖ ' + e.message, true); }
@@ -2589,6 +2592,7 @@ function bdManualLoad() {
   });
   builderDataset = normalizeRows(rows);
   builderConnId = null;   // manually-entered data isn't tied to a connection
+  builderSource = { tab: 'manual' };
   setBdStatus('bdMStatus', `✓ ${builderDataset.rows.length} rows loaded`, false);
   onBuilderDataLoaded();
 }
@@ -2659,9 +2663,13 @@ function openBuilder(existing, presetType) {
   // NEW graph: start EMPTY & independent — never inherit the previous graph's data.
   builderDataset = existing ? (existing.savedDataset || ds) : null;
   builderConnId = existing?.connectionId || null;
-  // Restore the Manual grid ONLY when the data was entered manually (no
-  // connection / query source) — connection/query widgets keep the blank template.
-  if (existing && existing.savedDataset && !existing.connectionId) {
+  builderSource = existing?.source || null;   // remembered data-source selection
+  // Restore the Manual grid only for manually-entered widgets. Prefer the saved
+  // source; fall back to the "no connection" heuristic for widgets saved before
+  // `source` existed. Browse/query widgets keep the blank template.
+  const wasManual = existing?.source ? existing.source.tab === 'manual'
+                                     : !!(existing?.savedDataset && !existing.connectionId);
+  if (existing && wasManual && existing.savedDataset && existing.savedDataset.columns && existing.savedDataset.columns.length) {
     const ds = existing.savedDataset;
     bdManualModel = {
       columns: ds.columns.slice(),
@@ -2690,13 +2698,9 @@ function openBuilder(existing, presetType) {
       badge.textContent = `${builderDataset.rows.length} rows · ${builderDataset.columns.length} cols`;
       badge.className = 'bdata-badge';
       // Editing a widget with data: keep the panel OPEN so you SEE what you entered.
-      // For manually-entered widgets, jump to the Manual tab (its grid is restored).
-      if (existing) {
-        $('#bdataSection').classList.add('open');
-        if (bdManualModel) activateBdsTab('manual');
-      } else {
-        $('#bdataSection').classList.remove('open');
-      }
+      // The correct tab + fields are restored by restoreBuilderSource().
+      if (existing) $('#bdataSection').classList.add('open');
+      else $('#bdataSection').classList.remove('open');
     } else {
       badge.textContent = 'No data';
       badge.className = 'bdata-badge none';
@@ -2704,12 +2708,37 @@ function openBuilder(existing, presetType) {
     }
   }
 
-  // Populate browse tables
-  refreshBdBrowseTables();
+  // Populate browse tables, then restore the remembered data-source selection.
+  refreshBdBrowseTables().then(() => restoreBuilderSource());
   renderBdManualTable();
 
   renderBuilderForm();
   $('#builderOverlay').classList.add('open');
+}
+
+// Restore the data-source tab + its fields (browse table/cols/filter, or query text)
+// from the widget's saved `source`, so editing shows what you originally picked.
+function restoreBuilderSource() {
+  const s = builderSource;
+  if (s && s.tab === 'query') {
+    activateBdsTab('query');
+    if (s.query != null) $('#bdQueryInput').value = s.query;
+    return;
+  }
+  if (s && s.tab === 'browse') {
+    activateBdsTab('browse');
+    const tsel = $('#bdBrTable');
+    if (tsel && s.table && [...tsel.options].some(o => o.value === s.table)) {
+      tsel.value = s.table;
+      refreshBdBrColumns();
+      if (s.columns && s.columns.length) $$('#bdBrCols .bds-chip').forEach(ch => ch.classList.toggle('on', s.columns.includes(ch.dataset.col)));
+      if (s.fCol) $('#bdBrFCol').value = s.fCol;
+      if (s.fOp)  $('#bdBrFOp').value = s.fOp;
+      if (s.fVal) $('#bdBrFVal').value = s.fVal;
+    }
+    return;
+  }
+  if ((s && s.tab === 'manual') || bdManualModel) activateBdsTab('manual');
 }
 
 function updateBuilderHeading() {
@@ -2721,7 +2750,7 @@ function updateBuilderHeading() {
 function closeBuilder() {
   $('#builderOverlay').classList.remove('open');
   if (builderChart) { try { builderChart.destroy(); } catch(e) {} builderChart = null; }
-  builderTarget = null; builderDraft = null; builderDataset = null;
+  builderTarget = null; builderDraft = null; builderDataset = null; builderSource = null;
 }
 
 function renderBuilderForm() {
@@ -2845,6 +2874,7 @@ function saveBuilder() {
   // Attach the builder's own dataset to the widget so it renders independently
   if (builderDataset) d.savedDataset = builderDataset;
   d.connectionId = builderConnId || null;   // remember which connection fed this widget
+  d.source = builderSource || d.source || null;   // remember HOW the data was picked (browse/query/manual)
   // Also push to global dataset if there's no global data yet
   if (builderDataset && !dataset.rows.length) {
     dataset = builderDataset;
