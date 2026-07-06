@@ -1292,10 +1292,10 @@ const CHART_TYPES = [
   ['scatter','Scatter Plot'],['bubble','Bubble Chart'],['lollipop','Lollipop'],
   ['heatmap','Heatmap'],['treemap','Treemap'],
   ['funnel','Funnel'],['pyramid','Pyramid'],['progress','Progress Bars'],
-  ['worldmap','World Map'],['calendar','Calendar Heatmap'],
+  ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -2114,6 +2114,7 @@ function renderWidgetBody(w) {
     if (w.type==='table') { renderTable(w, body, rows); dataset = prevDs; return; }
     if (w.type==='worldmap') { renderWorldMap(w, body, rows); dataset = prevDs; return; }
     if (w.type==='calendar') { renderCalendar(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='waterfall') { charts[w.id] = renderWaterfall(w, body, rows); dataset = prevDs; return; }
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
@@ -2730,6 +2731,54 @@ function renderCalendar(w, container, rows) {
   holder.appendChild(legend);
 }
 
+/* =====================================================================
+   Waterfall chart — decomposes a value into cumulative up/down steps
+   (e.g. a revenue bridge). X = step label, Y = signed delta per step.
+   Uses aggregate() for the deltas and Chart.js floating bars [start,end].
+   Positive steps use the "up" color, negative the "down" color, unless a
+   conditional-coloring rule (w.thresholds) matches. Returns the Chart so
+   the caller can track it for destruction (like the other Chart.js types).
+   ===================================================================== */
+function renderWaterfall(w, container, rows) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder';
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  if (!w.x || !w.y) { holder.innerHTML = '<div class="bpreview-empty">Pick an <b>X (step)</b> and a <b>Y (value)</b> column.</div>'; return null; }
+  const agg = aggregate(rows, w.x, w.y, (w.agg && w.agg !== 'none') ? w.agg : 'sum');   // [[label, delta], …]
+  if (!agg.length) { holder.innerHTML = '<div class="bpreview-empty">No data to plot.</div>'; return null; }
+  const UP = '#2ea043', DOWN = '#e5534b', TOTAL = '#6b7280';
+  const labels = [], data = [], colors = [];
+  let run = 0;
+  agg.forEach(([lab, val]) => {
+    const start = run, end = run + (+val || 0); run = end;
+    labels.push(String(lab));
+    data.push([start, end]);
+    let c = (w.thresholds && w.thresholds.length) ? colorForValue(+val || 0, w.thresholds, null) : null;
+    colors.push(c || ((+val || 0) >= 0 ? UP : DOWN));
+  });
+  labels.push('Total'); data.push([0, run]); colors.push(TOTAL);   // final cumulative bar
+  const canvas = document.createElement('canvas');
+  holder.appendChild(canvas);
+  try {
+    return new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: colors, borderWidth: 0, borderRadius: 3 }] },
+      options: baseOpts({
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => { const a = ctx.raw; const delta = Array.isArray(a) ? a[1] - a[0] : a; return (ctx.label === 'Total' ? 'Total: ' : (delta >= 0 ? '▲ +' : '▼ ')) + fmtNum(delta); } } }
+        },
+        scales: axisOpts()
+      })
+    });
+  } catch (err) {
+    holder.innerHTML = `<div class="w-error"><div class="big">⚠</div>${escapeHtml(err.message)}</div>`;
+    return null;
+  }
+}
+
 function renderTable(w, body, rows) {
   const cols = dataset.columns;
   const wrap = document.createElement('div'); wrap.className='dt-wrap';
@@ -3140,6 +3189,7 @@ function renderBuilderForm() {
       <div class="bfield"><label>Aggregate</label><select class="binput" id="bAgg">${AGGREGATES.map(a => `<option value="${a}" ${a === d.agg ? 'selected' : ''}>${AGG_LABELS[a]}</option>`).join('')}</select></div>
     </div>`}
     ${d.type === 'calendar' ? `<div class="bhint">« X / Label » = colonne <b>date</b> (une cellule par jour), « Y / Value » = valeur agrégée par jour.</div>` : ''}
+    ${d.type === 'waterfall' ? `<div class="bhint">« X / Label » = étapes, « Y / Value » = variation (delta) de chaque étape. Une barre « Total » est ajoutée à la fin.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
@@ -3173,7 +3223,7 @@ function renderBuilderForm() {
   }
   builderPreview();
 }
-const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap','calendar'];
+const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap','calendar','waterfall'];
 function renderThresholdRows() {
   const wrap = $('#bThresholds'); if (!wrap) return;
   const d = builderDraft; d.thresholds = d.thresholds || [];
@@ -3238,6 +3288,11 @@ function builderPreview() {
   }
   if (d.type === 'calendar') {
     renderCalendar(d, holder, rows);
+    if (builderDataset) dataset = prev;
+    return;
+  }
+  if (d.type === 'waterfall') {
+    builderChart = renderWaterfall(d, holder, rows);
     if (builderDataset) dataset = prev;
     return;
   }
