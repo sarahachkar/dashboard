@@ -548,6 +548,11 @@ select.input { cursor: pointer; }
 .map-legend .ml-nd { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--border); }
 .map-legend .ml-nd i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); }
 .map-holder svg path.mp-selected { stroke: var(--accent); stroke-width: 1.8; }
+.cal-holder { position: relative; display: flex; flex-direction: column; }
+.cal-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; flex: 1; display: flex; align-items: center; }
+.cal-scroll svg { display: block; }
+.cal-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-top: 6px; font-size: 11px; color: var(--text-dim); }
+.cal-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); }
 #mapFilterBar { margin: 0 0 12px; }
 .mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
 .mapfilter-chip .mf-x { cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 13px; line-height: 1; border: none; }
@@ -1287,10 +1292,10 @@ const CHART_TYPES = [
   ['scatter','Scatter Plot'],['bubble','Bubble Chart'],['lollipop','Lollipop'],
   ['heatmap','Heatmap'],['treemap','Treemap'],
   ['funnel','Funnel'],['pyramid','Pyramid'],['progress','Progress Bars'],
-  ['worldmap','World Map'],
+  ['worldmap','World Map'],['calendar','Calendar Heatmap'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -2108,6 +2113,7 @@ function renderWidgetBody(w) {
     if (w.type==='kpi') { renderKPI(w, body, rows); dataset = prevDs; return; }
     if (w.type==='table') { renderTable(w, body, rows); dataset = prevDs; return; }
     if (w.type==='worldmap') { renderWorldMap(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='calendar') { renderCalendar(w, body, rows); dataset = prevDs; return; }
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
@@ -2605,6 +2611,125 @@ async function renderWorldMap(w, container, rows) {
   }
 }
 
+/* =====================================================================
+   Calendar heatmap — one cell per day (GitHub-contributions style).
+   X / Label = date column, Y / Value = value aggregated per day (via the
+   existing aggValues() so it honours the widget's Aggregate setting).
+   Integrates with: time-range & search (works on the `rows` it's given),
+   conditional coloring (w.thresholds), and the theme (neutral cell color).
+   ===================================================================== */
+function _parseDateVal(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return isNaN(v) ? null : v;
+  if (typeof v === 'number') { const d = new Date(v < 1e12 ? v * 1000 : v); return isNaN(d) ? null : d; }
+  const s = String(v).trim();
+  let d = new Date(s); if (!isNaN(d)) return d;
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);   // DD/MM/YYYY or D-M-YY
+  if (m) { const yr = m[3].length === 2 ? '20' + m[3] : m[3]; d = new Date(+yr, +m[2] - 1, +m[1]); if (!isNaN(d)) return d; }
+  return null;
+}
+function _isoDay(dt) {
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
+function renderCalendar(w, container, rows) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder cal-holder';
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  const dateCol = w.x, valueCol = w.y;
+  if (!dateCol) { holder.innerHTML = '<div class="bpreview-empty">Pick a <b>date</b> column (X / Label).</div>'; return; }
+  // Group rows by day, then reduce each day with the widget's aggregate setting.
+  const byDay = {};
+  rows.forEach(r => {
+    const dt = _parseDateVal(r[dateCol]); if (!dt) return;
+    const key = _isoDay(dt);
+    const val = valueCol ? (+r[valueCol] || 0) : 1;   // no value column → count days
+    (byDay[key] = byDay[key] || []).push(val);
+  });
+  const agg = (valueCol && w.agg && w.agg !== 'none') ? w.agg : (valueCol ? 'sum' : 'count');
+  const dayVal = {};
+  for (const k in byDay) dayVal[k] = aggValues(byDay[k], agg);
+  const keys = Object.keys(dayVal).sort();
+  if (!keys.length) { holder.innerHTML = '<div class="bpreview-empty">No valid dates found in “' + escapeHtml(dateCol) + '”.</div>'; return; }
+  const vals = keys.map(k => dayVal[k]);
+  const min = Math.min(...vals); let max = Math.max(...vals); if (max === min) max = min + 1;
+
+  // Date span, snapped to whole weeks (weeks start Sunday, like GitHub).
+  const start = new Date(keys[0] + 'T00:00:00'); const end = new Date(keys[keys.length - 1] + 'T00:00:00');
+  const gridStart = new Date(start); gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+  const CELL = 13, GAP = 3, STEP = CELL + GAP, TOP = 18, LEFT = 28;
+  const weeks = Math.floor((end - gridStart) / (7 * 86400000)) + 1;
+  const W = LEFT + weeks * STEP + 4, H = TOP + 7 * STEP + 4;
+
+  const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
+  const scale = (typeof d3 !== 'undefined')
+    ? d3.scaleSequential(t => d3.interpolateGreens(0.15 + 0.85 * t)).domain([min, max])
+    : null;
+  const neutral = (getComputedStyle(document.body).getPropertyValue('--panel-2').trim()) || '#e5e7eb';
+  const cellColor = v => {
+    if (v == null) return neutral;
+    if (w.thresholds && w.thresholds.length) { const c = colorForValue(v, w.thresholds, null); if (c) return c; }
+    if (scale) return scale(v);
+    const t = (v - min) / (max - min); return `rgba(46,160,67,${0.2 + 0.8 * t})`;   // D3-less fallback
+  };
+
+  const wrap = document.createElement('div'); wrap.className = 'cal-scroll';
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('width', W); svg.setAttribute('height', H);
+  svg.style.maxWidth = 'none';
+  const tip = document.createElement('div'); tip.className = 'map-tooltip'; tip.style.display = 'none';
+
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dows = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+  const txtColor = textColor();
+  dows.forEach((lbl, i) => { if (!lbl) return;
+    const t = document.createElementNS(svgNS, 'text'); t.setAttribute('x', 0); t.setAttribute('y', TOP + i * STEP + CELL - 2);
+    t.setAttribute('fill', txtColor); t.setAttribute('font-size', '9'); t.textContent = lbl; svg.appendChild(t); });
+
+  let lastMonth = -1;
+  const cur = new Date(gridStart);
+  for (let wi = 0; wi < weeks; wi++) {
+    for (let dow = 0; dow < 7; dow++) {
+      const key = _isoDay(cur);
+      const inRange = cur >= gridStart && cur <= end;
+      if (inRange) {
+        const has = key in dayVal, v = has ? dayVal[key] : null;
+        const rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', LEFT + wi * STEP); rect.setAttribute('y', TOP + dow * STEP);
+        rect.setAttribute('width', CELL); rect.setAttribute('height', CELL); rect.setAttribute('rx', 2);
+        rect.setAttribute('fill', has ? cellColor(v) : neutral);
+        rect.setAttribute('stroke', gridColor() || '#fff'); rect.setAttribute('stroke-width', '0.5');
+        const match = !q || key.includes(q) || (has && String(v).toLowerCase().includes(q));
+        rect.setAttribute('opacity', match ? 1 : 0.2);
+        rect.addEventListener('mousemove', ev => {
+          const r = holder.getBoundingClientRect();
+          tip.style.display = 'block'; tip.style.left = (ev.clientX - r.left + 12) + 'px'; tip.style.top = (ev.clientY - r.top + 12) + 'px';
+          tip.innerHTML = `<b>${key}</b><br>${has ? escapeHtml(fmtNum(v)) : '<span style="opacity:.6">no data</span>'}`;
+        });
+        rect.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+        svg.appendChild(rect);
+      }
+      // Month label at the top of each column (on the first day of a new month)
+      if (dow === 0 && cur.getMonth() !== lastMonth && cur <= end) {
+        lastMonth = cur.getMonth();
+        const t = document.createElementNS(svgNS, 'text'); t.setAttribute('x', LEFT + wi * STEP); t.setAttribute('y', 10);
+        t.setAttribute('fill', txtColor); t.setAttribute('font-size', '9'); t.textContent = months[cur.getMonth()]; svg.appendChild(t);
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  wrap.appendChild(svg);
+  holder.appendChild(wrap);
+  holder.appendChild(tip);
+  // Legend: Less → More
+  const legend = document.createElement('div'); legend.className = 'cal-legend';
+  const swatches = [0, 0.25, 0.5, 0.75, 1].map(t => `<i style="background:${cellColor(min + t * (max - min))}"></i>`).join('');
+  legend.innerHTML = `<span>Less</span>${swatches}<span>More</span>`;
+  holder.appendChild(legend);
+}
+
 function renderTable(w, body, rows) {
   const cols = dataset.columns;
   const wrap = document.createElement('div'); wrap.className='dt-wrap';
@@ -3014,6 +3139,7 @@ function renderBuilderForm() {
       <div class="bfield"><label>Group by</label><select class="binput" id="bGroup">${cols.length ? optBlank(cols, d.group) : '<option value="">—</option>'}</select></div>
       <div class="bfield"><label>Aggregate</label><select class="binput" id="bAgg">${AGGREGATES.map(a => `<option value="${a}" ${a === d.agg ? 'selected' : ''}>${AGG_LABELS[a]}</option>`).join('')}</select></div>
     </div>`}
+    ${d.type === 'calendar' ? `<div class="bhint">« X / Label » = colonne <b>date</b> (une cellule par jour), « Y / Value » = valeur agrégée par jour.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
@@ -3047,7 +3173,7 @@ function renderBuilderForm() {
   }
   builderPreview();
 }
-const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap'];
+const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap','calendar'];
 function renderThresholdRows() {
   const wrap = $('#bThresholds'); if (!wrap) return;
   const d = builderDraft; d.thresholds = d.thresholds || [];
@@ -3107,6 +3233,11 @@ function builderPreview() {
   }
   if (d.type === 'worldmap') {
     renderWorldMap(d, holder, rows);
+    if (builderDataset) dataset = prev;
+    return;
+  }
+  if (d.type === 'calendar') {
+    renderCalendar(d, holder, rows);
     if (builderDataset) dataset = prev;
     return;
   }
