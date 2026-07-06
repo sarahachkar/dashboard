@@ -553,6 +553,8 @@ select.input { cursor: pointer; }
 .cal-scroll svg { display: block; }
 .cal-legend { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-top: 6px; font-size: 11px; color: var(--text-dim); }
 .cal-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); }
+.gantt-holder { position: relative; }
+.gantt-scroll { width: 100%; height: 100%; overflow: auto; color: var(--text); }
 #mapFilterBar { margin: 0 0 12px; }
 .mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
 .mapfilter-chip .mf-x { cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 13px; line-height: 1; border: none; }
@@ -1292,10 +1294,10 @@ const CHART_TYPES = [
   ['scatter','Scatter Plot'],['bubble','Bubble Chart'],['lollipop','Lollipop'],
   ['heatmap','Heatmap'],['treemap','Treemap'],
   ['funnel','Funnel'],['pyramid','Pyramid'],['progress','Progress Bars'],
-  ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],
+  ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],['gantt','Gantt / Timeline'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -2115,6 +2117,7 @@ function renderWidgetBody(w) {
     if (w.type==='worldmap') { renderWorldMap(w, body, rows); dataset = prevDs; return; }
     if (w.type==='calendar') { renderCalendar(w, body, rows); dataset = prevDs; return; }
     if (w.type==='waterfall') { charts[w.id] = renderWaterfall(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='gantt') { renderGantt(w, body, rows); dataset = prevDs; return; }
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
@@ -2779,6 +2782,84 @@ function renderWaterfall(w, container, rows) {
   }
 }
 
+/* =====================================================================
+   Gantt / Timeline — one lane per label, a horizontal bar for each row's
+   [start, end] date range (e.g. bookings per room over time).
+   X / Label = lane, ganttStart / ganttEnd = date columns.
+   Integrates: time-range & global search (works on the given rows; search
+   dims non-matching bars), theme palette, permissions (rendered read-only
+   like any widget). Does not use aggregate/thresholds (it plots raw spans).
+   ===================================================================== */
+function renderGantt(w, container, rows) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder gantt-holder';
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  const rowCol = w.x, startCol = w.ganttStart || w.x, endCol = w.ganttEnd || w.y;
+  if (!rowCol || !startCol || !endCol) { holder.innerHTML = '<div class="bpreview-empty">Pick a <b>Label</b> (row) plus <b>Start</b> and <b>End</b> date columns.</div>'; return; }
+  const items = [];
+  rows.forEach(r => {
+    const s = _parseDateVal(r[startCol]), e = _parseDateVal(r[endCol]);
+    if (!s || !e) return;
+    const a = s <= e ? s : e, b = s <= e ? e : s;
+    items.push({ row: String(r[rowCol] ?? '—'), start: a, end: b });
+  });
+  if (!items.length) { holder.innerHTML = '<div class="bpreview-empty">No valid start/end dates found.</div>'; return; }
+  const lanes = [...new Set(items.map(i => i.row))];
+  const tMin = Math.min(...items.map(i => +i.start));
+  let tMax = Math.max(...items.map(i => +i.end)); if (tMax === tMin) tMax = tMin + 86400000;
+
+  const LEFT = 118, TOP = 22, laneH = 24, barH = 15, RIGHT = 12, W = 900;
+  const plotW = W - LEFT - RIGHT;
+  const H = TOP + lanes.length * laneH + 26;
+  const x = t => LEFT + (t - tMin) / (tMax - tMin) * plotW;
+  const colors = pal(w.theme);
+  const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
+  const txt = textColor(), grid = gridColor() || '#ddd';
+
+  const wrap = document.createElement('div'); wrap.className = 'gantt-scroll';
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.style.width = '100%'; svg.style.height = '100%'; svg.style.minHeight = (H) + 'px'; svg.style.display = 'block';
+  const tip = document.createElement('div'); tip.className = 'map-tooltip'; tip.style.display = 'none';
+  const mk = (tag, attrs) => { const el = document.createElementNS(svgNS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
+  const fmtD = dt => dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+
+  // Time gridlines + axis labels (~6 ticks)
+  const TICKS = 6;
+  for (let i = 0; i <= TICKS; i++) {
+    const t = tMin + (tMax - tMin) * i / TICKS, px = x(t);
+    svg.appendChild(mk('line', { x1: px, y1: TOP - 4, x2: px, y2: H - 20, stroke: grid, 'stroke-width': 0.5 }));
+    const lab = mk('text', { x: px, y: H - 6, fill: txt, 'font-size': 9, 'text-anchor': 'middle' });
+    lab.textContent = fmtD(new Date(t)); svg.appendChild(lab);
+  }
+  // Lanes + bars
+  lanes.forEach((lane, li) => {
+    const y = TOP + li * laneH;
+    const lbl = mk('text', { x: 0, y: y + laneH / 2 + 3, fill: txt, 'font-size': 10 });
+    lbl.textContent = lane.length > 16 ? lane.slice(0, 15) + '…' : lane; svg.appendChild(lbl);
+    if (li % 2 === 0) svg.appendChild(mk('rect', { x: LEFT, y, width: plotW, height: laneH, fill: 'currentColor', opacity: 0.03 }));
+    items.filter(i => i.row === lane).forEach((i, k) => {
+      const bx = x(+i.start), bw = Math.max(3, x(+i.end) - x(+i.start));
+      const color = colors[(li + k) % colors.length];
+      const match = !q || lane.toLowerCase().includes(q) || fmtD(i.start).includes(q) || fmtD(i.end).includes(q);
+      const rect = mk('rect', { x: bx, y: y + (laneH - barH) / 2, width: bw, height: barH, rx: 4, fill: color, opacity: match ? 0.92 : 0.18 });
+      rect.style.cursor = 'default';
+      rect.addEventListener('mousemove', ev => {
+        const r = holder.getBoundingClientRect();
+        const days = Math.max(1, Math.round((i.end - i.start) / 86400000));
+        tip.style.display = 'block'; tip.style.left = (ev.clientX - r.left + 12) + 'px'; tip.style.top = (ev.clientY - r.top + 12) + 'px';
+        tip.innerHTML = `<b>${escapeHtml(lane)}</b><br>${fmtD(i.start)} → ${fmtD(i.end)}<br><span style="opacity:.7">${days} day${days > 1 ? 's' : ''}</span>`;
+      });
+      rect.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      svg.appendChild(rect);
+    });
+  });
+  wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
+}
+
 function renderTable(w, body, rows) {
   const cols = dataset.columns;
   const wrap = document.createElement('div'); wrap.className='dt-wrap';
@@ -3190,6 +3271,12 @@ function renderBuilderForm() {
     </div>`}
     ${d.type === 'calendar' ? `<div class="bhint">« X / Label » = colonne <b>date</b> (une cellule par jour), « Y / Value » = valeur agrégée par jour.</div>` : ''}
     ${d.type === 'waterfall' ? `<div class="bhint">« X / Label » = étapes, « Y / Value » = variation (delta) de chaque étape. Une barre « Total » est ajoutée à la fin.</div>` : ''}
+    ${d.type === 'gantt' ? `
+    <div class="brow">
+      <div class="bfield"><label>Start date column</label><select class="binput" id="bGanttStart">${cols.length ? opt(cols, d.ganttStart || d.x) : '<option value="">— load data first —</option>'}</select></div>
+      <div class="bfield"><label>End date column</label><select class="binput" id="bGanttEnd">${cols.length ? opt(cols, d.ganttEnd || d.y) : '<option value="">— load data first —</option>'}</select></div>
+    </div>
+    <div class="bhint">« X / Label » = la ligne (ex : chambre, tâche, personne). <b>Start</b>/<b>End</b> = colonnes de dates. Une barre par période.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
@@ -3217,6 +3304,7 @@ function renderBuilderForm() {
   });
   const bind = (id, key) => { const el = $(id); if (el) el.onchange = () => { d[key] = el.value; builderPreview(); }; };
   bind('#bX', 'x'); bind('#bY', 'y'); bind('#bGroup', 'group'); bind('#bAgg', 'agg'); bind('#bTheme', 'theme'); bind('#bCountry', 'country'); bind('#bLinkCountry', 'linkCountry');
+  bind('#bGanttStart', 'ganttStart'); bind('#bGanttEnd', 'ganttEnd');
   if (THRESHOLD_TYPES.includes(d.type)) {
     renderThresholdRows();
     $('#bAddThreshold').onclick = () => { d.thresholds = d.thresholds || []; d.thresholds.push({ op: 'lt', value: 0, color: '#e24b4a' }); renderThresholdRows(); builderPreview(); };
@@ -3293,6 +3381,11 @@ function builderPreview() {
   }
   if (d.type === 'waterfall') {
     builderChart = renderWaterfall(d, holder, rows);
+    if (builderDataset) dataset = prev;
+    return;
+  }
+  if (d.type === 'gantt') {
+    renderGantt(d, holder, rows);
     if (builderDataset) dataset = prev;
     return;
   }
