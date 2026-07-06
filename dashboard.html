@@ -555,6 +555,7 @@ select.input { cursor: pointer; }
 .cal-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid var(--border); }
 .gantt-holder { position: relative; }
 .gantt-scroll { width: 100%; height: 100%; overflow: auto; color: var(--text); }
+.box-holder { position: relative; }
 #mapFilterBar { margin: 0 0 12px; }
 .mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
 .mapfilter-chip .mf-x { cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 13px; line-height: 1; border: none; }
@@ -1294,10 +1295,10 @@ const CHART_TYPES = [
   ['scatter','Scatter Plot'],['bubble','Bubble Chart'],['lollipop','Lollipop'],
   ['heatmap','Heatmap'],['treemap','Treemap'],
   ['funnel','Funnel'],['pyramid','Pyramid'],['progress','Progress Bars'],
-  ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],['gantt','Gantt / Timeline'],
+  ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],['gantt','Gantt / Timeline'],['boxplot','Box Plot'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', boxplot:'📦', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -2118,6 +2119,7 @@ function renderWidgetBody(w) {
     if (w.type==='calendar') { renderCalendar(w, body, rows); dataset = prevDs; return; }
     if (w.type==='waterfall') { charts[w.id] = renderWaterfall(w, body, rows); dataset = prevDs; return; }
     if (w.type==='gantt') { renderGantt(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='boxplot') { renderBoxplot(w, body, rows); dataset = prevDs; return; }
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
@@ -2860,6 +2862,93 @@ function renderGantt(w, container, rows) {
   wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
 }
 
+/* =====================================================================
+   Box plot — distribution per category (min, Q1, median, Q3, max) plus
+   1.5·IQR whiskers and outlier dots. X / Label = category, Y = value.
+   Plots the raw distribution (not aggregated). Integrates with time-range,
+   global search (dims non-matching boxes) and the theme palette.
+   ===================================================================== */
+function _quantile(sorted, p) {
+  const idx = (sorted.length - 1) * p, lo = Math.floor(idx), hi = Math.ceil(idx);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+function renderBoxplot(w, container, rows) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder box-holder';
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  const catCol = w.x, valCol = w.y;
+  if (!catCol || !valCol) { holder.innerHTML = '<div class="bpreview-empty">Pick a <b>category</b> (X) and a numeric <b>value</b> (Y).</div>'; return; }
+  const groups = {};
+  rows.forEach(r => { const v = +r[valCol]; if (!isNaN(v)) (groups[r[catCol] ?? '—'] = groups[r[catCol] ?? '—'] || []).push(v); });
+  const cats = Object.keys(groups).filter(c => groups[c].length);
+  if (!cats.length) { holder.innerHTML = '<div class="bpreview-empty">No numeric values in “' + escapeHtml(valCol) + '”.</div>'; return; }
+  const stats = cats.map(c => {
+    const s = groups[c].slice().sort((a, b) => a - b);
+    const q1 = _quantile(s, 0.25), med = _quantile(s, 0.5), q3 = _quantile(s, 0.75), iqr = q3 - q1;
+    const loF = q1 - 1.5 * iqr, hiF = q3 + 1.5 * iqr;
+    const inside = s.filter(v => v >= loF && v <= hiF);
+    const whiskLo = inside.length ? inside[0] : s[0], whiskHi = inside.length ? inside[inside.length - 1] : s[s.length - 1];
+    const outliers = s.filter(v => v < loF || v > hiF);
+    return { c, q1, med, q3, whiskLo, whiskHi, outliers, n: s.length };
+  });
+  let dMin = Math.min(...stats.map(s => Math.min(s.whiskLo, ...s.outliers)));
+  let dMax = Math.max(...stats.map(s => Math.max(s.whiskHi, ...s.outliers)));
+  if (dMax === dMin) dMax = dMin + 1;
+  const pad = (dMax - dMin) * 0.08; dMin -= pad; dMax += pad;
+
+  const LEFT = 50, TOP = 14, BOT = 30, RIGHT = 14, W = 900, H = 340;
+  const plotW = W - LEFT - RIGHT, plotH = H - TOP - BOT;
+  const y = v => TOP + (1 - (v - dMin) / (dMax - dMin)) * plotH;
+  const slot = plotW / cats.length, boxW = Math.min(60, slot * 0.5);
+  const colors = pal(w.theme);
+  const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
+  const txt = textColor(), grid = gridColor() || '#ddd';
+
+  const wrap = document.createElement('div'); wrap.className = 'gantt-scroll';
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.style.width = '100%'; svg.style.height = '100%'; svg.style.minHeight = '220px'; svg.style.display = 'block';
+  const tip = document.createElement('div'); tip.className = 'map-tooltip'; tip.style.display = 'none';
+  const mk = (tag, attrs) => { const el = document.createElementNS(svgNS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
+
+  // Y gridlines + labels
+  for (let i = 0; i <= 4; i++) {
+    const v = dMin + (dMax - dMin) * i / 4, py = y(v);
+    svg.appendChild(mk('line', { x1: LEFT, y1: py, x2: W - RIGHT, y2: py, stroke: grid, 'stroke-width': 0.5 }));
+    const t = mk('text', { x: LEFT - 6, y: py + 3, fill: txt, 'font-size': 9, 'text-anchor': 'end' }); t.textContent = fmtNum(v); svg.appendChild(t);
+  }
+  stats.forEach((s, i) => {
+    const cx = LEFT + slot * i + slot / 2, color = colors[i % colors.length];
+    const match = !q || String(s.c).toLowerCase().includes(q);
+    const op = match ? 1 : 0.2;
+    // whiskers
+    svg.appendChild(mk('line', { x1: cx, y1: y(s.whiskHi), x2: cx, y2: y(s.q3), stroke: color, 'stroke-width': 1.5, opacity: op }));
+    svg.appendChild(mk('line', { x1: cx, y1: y(s.whiskLo), x2: cx, y2: y(s.q1), stroke: color, 'stroke-width': 1.5, opacity: op }));
+    svg.appendChild(mk('line', { x1: cx - boxW / 3, y1: y(s.whiskHi), x2: cx + boxW / 3, y2: y(s.whiskHi), stroke: color, 'stroke-width': 1.5, opacity: op }));
+    svg.appendChild(mk('line', { x1: cx - boxW / 3, y1: y(s.whiskLo), x2: cx + boxW / 3, y2: y(s.whiskLo), stroke: color, 'stroke-width': 1.5, opacity: op }));
+    // box
+    const box = mk('rect', { x: cx - boxW / 2, y: y(s.q3), width: boxW, height: Math.max(1, y(s.q1) - y(s.q3)), rx: 3, fill: color, 'fill-opacity': match ? 0.28 : 0.08, stroke: color, 'stroke-width': 1.5, opacity: op });
+    box.addEventListener('mousemove', ev => {
+      const r = holder.getBoundingClientRect();
+      tip.style.display = 'block'; tip.style.left = (ev.clientX - r.left + 12) + 'px'; tip.style.top = (ev.clientY - r.top + 12) + 'px';
+      tip.innerHTML = `<b>${escapeHtml(String(s.c))}</b><br>max ${fmtNum(s.whiskHi)}<br>Q3 ${fmtNum(s.q3)}<br>med ${fmtNum(s.med)}<br>Q1 ${fmtNum(s.q1)}<br>min ${fmtNum(s.whiskLo)}<br><span style="opacity:.7">n=${s.n}${s.outliers.length ? ', ' + s.outliers.length + ' outlier(s)' : ''}</span>`;
+    });
+    box.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    svg.appendChild(box);
+    // median line
+    svg.appendChild(mk('line', { x1: cx - boxW / 2, y1: y(s.med), x2: cx + boxW / 2, y2: y(s.med), stroke: color, 'stroke-width': 2.5, opacity: op }));
+    // outliers
+    s.outliers.forEach(v => svg.appendChild(mk('circle', { cx, cy: y(v), r: 2.5, fill: 'none', stroke: color, 'stroke-width': 1.2, opacity: op })));
+    // category label
+    const lbl = mk('text', { x: cx, y: H - 10, fill: txt, 'font-size': 10, 'text-anchor': 'middle' });
+    const nm = String(s.c); lbl.textContent = nm.length > 12 ? nm.slice(0, 11) + '…' : nm; svg.appendChild(lbl);
+  });
+  wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
+}
+
 function renderTable(w, body, rows) {
   const cols = dataset.columns;
   const wrap = document.createElement('div'); wrap.className='dt-wrap';
@@ -3277,6 +3366,7 @@ function renderBuilderForm() {
       <div class="bfield"><label>End date column</label><select class="binput" id="bGanttEnd">${cols.length ? opt(cols, d.ganttEnd || d.y) : '<option value="">— load data first —</option>'}</select></div>
     </div>
     <div class="bhint">« X / Label » = la ligne (ex : chambre, tâche, personne). <b>Start</b>/<b>End</b> = colonnes de dates. Une barre par période.</div>` : ''}
+    ${d.type === 'boxplot' ? `<div class="bhint">« X / Label » = catégorie (une boîte par catégorie), « Y / Value » = valeur numérique. Affiche médiane, quartiles, moustaches et valeurs aberrantes.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
@@ -3386,6 +3476,11 @@ function builderPreview() {
   }
   if (d.type === 'gantt') {
     renderGantt(d, holder, rows);
+    if (builderDataset) dataset = prev;
+    return;
+  }
+  if (d.type === 'boxplot') {
+    renderBoxplot(d, holder, rows);
     if (builderDataset) dataset = prev;
     return;
   }
