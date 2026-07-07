@@ -3807,6 +3807,7 @@ function openBuilder(existing, presetType) {
   if (existing) { if (!widgetEditable(existing)) { toast('You do not have edit access to this graph', true); return; } }
   else if (!requireEdit()) return;
   const ds = dataset.rows.length ? dataset : null;
+  btypeQuery = ''; btypeShowAll = false;   // fresh chart-type picker each open
   builderTarget = existing ? existing.id : null;
   // Editing: restore this widget's own data (or the global one for legacy widgets).
   // NEW graph: start EMPTY & independent — never inherit the previous graph's data.
@@ -3902,6 +3903,41 @@ function closeBuilder() {
   builderTarget = null; builderDraft = null; builderDataset = null; builderSource = null;
 }
 
+/* Chart-type picker: live search + preview of the first few types with a
+   "View all" toggle, so the (40+) type list isn't a wall to scroll through. */
+const BTYPE_PREVIEW_COUNT = 9;
+let btypeQuery = '', btypeShowAll = false;
+function renderBtypeGrid() {
+  const wrap = $('#btypeGridWrap'); if (!wrap) return;
+  const d = builderDraft;
+  const q = btypeQuery.trim().toLowerCase();
+  let list = CHART_TYPES.filter(([v, l]) => !q || l.toLowerCase().includes(q) || v.toLowerCase().includes(q));
+  let capped = false;
+  if (!q && !btypeShowAll) {
+    list = CHART_TYPES.slice(0, BTYPE_PREVIEW_COUNT);
+    // always keep the currently-selected type visible
+    if (d.type && !list.some(([v]) => v === d.type)) {
+      const cur = CHART_TYPES.find(([v]) => v === d.type);
+      if (cur) list = list.concat([cur]);
+    }
+    capped = true;
+  }
+  const btn = (v, l) => `<button type="button" class="btype ${v === d.type ? 'active' : ''}" data-type="${v}"><span>${TYPE_ICONS[v] ? TYPE_ICONS[v] + ' ' : ''}${l}</span></button>`;
+  wrap.innerHTML =
+    (list.length ? `<div class="btype-grid">${list.map(([v, l]) => btn(v, l)).join('')}</div>`
+                 : `<div class="bhint">No chart type matches “${escapeHtml(btypeQuery)}”.</div>`) +
+    (!q && CHART_TYPES.length > BTYPE_PREVIEW_COUNT
+      ? `<div style="display:flex;justify-content:center;margin-top:9px">
+           <button type="button" class="viewall-btn" id="btypeViewAll">${capped ? `▼ View all ${CHART_TYPES.length} chart types` : '▲ Show less'}</button>
+         </div>` : '');
+  wrap.querySelectorAll('.btype').forEach(b => b.onclick = () => {
+    d.type = b.dataset.type;
+    renderBuilderForm();   // re-render (type-specific fields + thresholds) + preview
+  });
+  const va = wrap.querySelector('#btypeViewAll');
+  if (va) va.onclick = () => { btypeShowAll = !btypeShowAll; renderBtypeGrid(); };
+}
+
 function renderBuilderForm() {
   const d = builderDraft;
   const ds = activeBuilderDataset();
@@ -3916,7 +3952,10 @@ function renderBuilderForm() {
   $('#builderForm').innerHTML = `
     <div class="bfield"><label>Title</label><input class="binput" id="bTitle" value="${escapeHtml(d.title)}" placeholder="Untitled graph"></div>
     <div class="bfield"><label>Chart type</label>
-      <div class="btype-grid">${CHART_TYPES.map(([v, l]) => `<button type="button" class="btype ${v === d.type ? 'active' : ''}" data-type="${v}"><span>${l}</span></button>`).join('')}</div>
+      <div class="search-input-wrap" style="margin-bottom:8px">
+        <input class="binput" id="btypeSearch" placeholder="Search chart types… (pie, map, gantt…)" value="${escapeHtml(btypeQuery)}" autocomplete="off">
+      </div>
+      <div id="btypeGridWrap"></div>
     </div>
     ${d.type === 'worldmap' ? `
     <div class="brow">
@@ -3982,10 +4021,9 @@ function renderBuilderForm() {
     ${cols.length ? '' : '<div class="bhint" style="color:var(--warn)">⚠ Open the <b>Data source</b> section above to load data first — then your column selectors will appear.</div>'}
   `;
   $('#bTitle').oninput = e => { d.title = e.target.value; };
-  $$('#builderForm .btype').forEach(b => b.onclick = () => {
-    d.type = b.dataset.type;
-    renderBuilderForm();   // re-render (threshold section visibility depends on type) + preview
-  });
+  renderBtypeGrid();   // few types + "View all" + live search (focus preserved)
+  const bts = $('#btypeSearch');
+  if (bts) bts.oninput = () => { btypeQuery = bts.value; renderBtypeGrid(); };
   const bind = (id, key) => { const el = $(id); if (el) el.onchange = () => { d[key] = el.value; builderPreview(); }; };
   bind('#bX', 'x'); bind('#bY', 'y'); bind('#bGroup', 'group'); bind('#bAgg', 'agg'); bind('#bTheme', 'theme'); bind('#bCountry', 'country'); bind('#bLinkCountry', 'linkCountry');
   bind('#bGanttStart', 'ganttStart'); bind('#bGanttEnd', 'ganttEnd');
