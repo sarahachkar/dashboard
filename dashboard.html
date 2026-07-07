@@ -558,6 +558,7 @@ select.input { cursor: pointer; }
 .gantt-scroll { width: 100%; height: 100%; overflow: auto; color: var(--text); }
 .box-holder { position: relative; }
 .sankey-holder { position: relative; }
+.bullet-holder, .slope-holder, .bump-holder { position: relative; }
 #mapFilterBar { margin: 0 0 12px; }
 .mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
 .mapfilter-chip .mf-x { cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 13px; line-height: 1; border: none; }
@@ -1298,9 +1299,10 @@ const CHART_TYPES = [
   ['heatmap','Heatmap'],['treemap','Treemap'],
   ['funnel','Funnel'],['pyramid','Pyramid'],['progress','Progress Bars'],
   ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],['gantt','Gantt / Timeline'],['boxplot','Box Plot'],['sankey','Sankey Diagram'],
+  ['bullet','Bullet (vs target)'],['slope','Slope Chart'],['bump','Bump / Ranking'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', boxplot:'📦', sankey:'🔀', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', boxplot:'📦', sankey:'🔀', bullet:'🎯', slope:'📈', bump:'🏆', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -1926,6 +1928,8 @@ function buildWidget(w, idx) {
         ${editControls}
         ${canEditW ? `<button class="icon-btn" title="Cycle size (small / medium / large)" data-act="size">${(w.size||'medium')[0].toUpperCase()}</button>` : ''}
         <button class="icon-btn" title="Export PNG" data-act="export">⬇️</button>
+        <button class="icon-btn" title="Export CSV (data)" data-act="csv">⤓</button>
+        ${canEditW && (typeof canEditCurrent === 'undefined' || canEditCurrent) ? `<button class="icon-btn" title="Duplicate graph" data-act="duplicate">⧉</button>` : ''}
         <button class="icon-btn" title="Expand" data-act="maximize">⛶</button>
         ${removeControl}
       </div>
@@ -1945,6 +1949,8 @@ function buildWidget(w, idx) {
       const act = b.dataset.act;
       if (act==='remove') removeWidget(w.id);
       else if (act==='export') exportWidget(w);
+      else if (act==='csv') exportWidgetCSV(w);
+      else if (act==='duplicate') duplicateWidget(w);
       else if (act==='edit') openBuilder(w);
       else if (act==='minimize') toggleMinimize(w, el, b);
       else if (act==='maximize') toggleMaximize(w, el, b);
@@ -2123,6 +2129,9 @@ function renderWidgetBody(w) {
     if (w.type==='gantt') { renderGantt(w, body, rows); dataset = prevDs; return; }
     if (w.type==='boxplot') { renderBoxplot(w, body, rows); dataset = prevDs; return; }
     if (w.type==='sankey') { renderSankey(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='bullet') { renderBullet(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='slope') { renderSlope(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='bump') { renderBump(w, body, rows); dataset = prevDs; return; }
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
@@ -2974,7 +2983,7 @@ function renderSankey(w, container, rows) {
     const s = r[srcCol], t = r[tgtCol];
     if (s == null || t == null || s === '' || t === '') return;
     if (String(s) === String(t)) return;                    // skip self-loops (sankey must be acyclic)
-    const key = String(s) + ' ' + String(t);
+    const key = String(s) + '\u0000' + String(t);
     const v = valCol ? (+r[valCol] || 0) : 1;
     (pairVals[key] = pairVals[key] || []).push(v);
   });
@@ -2983,13 +2992,13 @@ function renderSankey(w, container, rows) {
   // both sides don't collapse into one node (source "A" ≠ target "A").
   const nodeIndex = {}, nodes = [];
   const nodeId = (name, side) => {
-    const key = side + ' ' + name;
+    const key = side + '\u0000' + name;
     if (!(key in nodeIndex)) { nodeIndex[key] = nodes.length; nodes.push({ name: String(name), side }); }
     return nodeIndex[key];
   };
   const links = [];
   for (const key in pairVals) {
-    const [s, t] = key.split(' ');
+    const [s, t] = key.split('\u0000');
     const value = aggValues(pairVals[key], agg);
     if (value > 0) links.push({ source: nodeId(s, 'src'), target: nodeId(t, 'tgt'), value });
   }
@@ -3032,6 +3041,169 @@ function renderSankey(w, container, rows) {
     holder.innerHTML = `<div class="w-error"><div class="big">⚠</div>Sankey error: ${escapeHtml(err.message)}<br><span style="color:var(--text-dim);font-size:11px">Source and target must form an acyclic flow.</span></div>`;
     return;
   }
+  wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
+}
+
+/* Small shared SVG helpers for the additive chart types below. */
+function _svgHolder(w, container, cls) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder ' + cls;
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  return holder;
+}
+function _mkSvg(W, H) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.style.width = '100%'; svg.style.height = '100%'; svg.style.minHeight = '180px'; svg.style.display = 'block';
+  return svg;
+}
+function _mkEl(tag, attrs) { const el = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; }
+
+/* =====================================================================
+   Bullet chart — one row per category: a value bar measured against a
+   target tick. X=category, Y=value, bulletTarget=target column.
+   Uses aggregate() for value & target; honours w.thresholds for the bar
+   color; integrates time-range, search dimming and theme.
+   ===================================================================== */
+function renderBullet(w, container, rows) {
+  const holder = _svgHolder(w, container, 'bullet-holder');
+  const catCol = w.x, valCol = w.y;
+  if (!catCol || !valCol) { holder.innerHTML = '<div class="bpreview-empty">Pick a <b>category</b> (X) and a <b>value</b> (Y).</div>'; return; }
+  const agg = (w.agg && w.agg !== 'none') ? w.agg : 'sum';
+  const vals = aggregate(rows, catCol, valCol, agg);
+  if (!vals.length) { holder.innerHTML = '<div class="bpreview-empty">No data to plot.</div>'; return; }
+  const tMap = {};
+  if (w.bulletTarget) aggregate(rows, catCol, w.bulletTarget, agg).forEach(([k, v]) => { tMap[k] = v; });
+  const maxV = Math.max(...vals.map(([, v]) => v), ...Object.values(tMap), 1) * 1.08;
+  const LEFT = 120, TOP = 12, rowH = 34, barH = 14, RIGHT = 40, W = 900;
+  const plotW = W - LEFT - RIGHT, H = TOP + vals.length * rowH + 6;
+  const x = v => LEFT + (v / maxV) * plotW;
+  const colors = pal(w.theme);
+  const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
+  const txt = textColor(), grid = gridColor() || '#ddd', neutral = (getComputedStyle(document.body).getPropertyValue('--panel-2').trim()) || '#eee';
+  const wrap = document.createElement('div'); wrap.className = 'gantt-scroll';
+  const svg = _mkSvg(W, H);
+  const tip = document.createElement('div'); tip.className = 'map-tooltip'; tip.style.display = 'none';
+  vals.forEach(([cat, v], i) => {
+    const y = TOP + i * rowH, cy = y + rowH / 2;
+    const match = !q || String(cat).toLowerCase().includes(q);
+    const op = match ? 1 : 0.2;
+    const nm = String(cat);
+    const lbl = _mkEl('text', { x: LEFT - 8, y: cy + 3, fill: txt, 'font-size': 10, 'text-anchor': 'end', opacity: op });
+    lbl.textContent = nm.length > 16 ? nm.slice(0, 15) + '…' : nm; svg.appendChild(lbl);
+    svg.appendChild(_mkEl('rect', { x: LEFT, y: cy - barH / 2 - 3, width: plotW, height: barH + 6, rx: 4, fill: neutral, opacity: op * 0.6 }));
+    let c = (w.thresholds && w.thresholds.length) ? colorForValue(v, w.thresholds, null) : null;
+    const bar = _mkEl('rect', { x: LEFT, y: cy - barH / 2, width: Math.max(1, x(v) - LEFT), height: barH, rx: 3, fill: c || colors[i % colors.length], opacity: op });
+    const tg = w.bulletTarget && (cat in tMap) ? tMap[cat] : null;
+    bar.addEventListener('mousemove', ev => {
+      const r = holder.getBoundingClientRect();
+      tip.style.display = 'block'; tip.style.left = (ev.clientX - r.left + 12) + 'px'; tip.style.top = (ev.clientY - r.top + 12) + 'px';
+      tip.innerHTML = `<b>${escapeHtml(nm)}</b><br>${escapeHtml(fmtNum(v))}${tg != null ? '<br><span style="opacity:.75">target ' + escapeHtml(fmtNum(tg)) + ' (' + Math.round(v / tg * 100) + '%)</span>' : ''}`;
+    });
+    bar.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    svg.appendChild(bar);
+    if (tg != null) svg.appendChild(_mkEl('line', { x1: x(tg), y1: cy - barH / 2 - 4, x2: x(tg), y2: cy + barH / 2 + 4, stroke: txt, 'stroke-width': 2.5, opacity: op }));
+  });
+  wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
+}
+
+/* =====================================================================
+   Slope chart — connects a "before" value (Y) to an "after" value
+   (slopeEnd) with a sloped line per category. X=series label.
+   Uses aggregate() for both ends; integrates search dimming & theme.
+   ===================================================================== */
+function renderSlope(w, container, rows) {
+  const holder = _svgHolder(w, container, 'slope-holder');
+  const catCol = w.x, v1Col = w.y, v2Col = w.slopeEnd;
+  if (!catCol || !v1Col || !v2Col) { holder.innerHTML = '<div class="bpreview-empty">Pick a <b>label</b> (X), a <b>before</b> value (Y) and an <b>after</b> value.</div>'; return; }
+  const agg = (w.agg && w.agg !== 'none') ? w.agg : 'sum';
+  const m1 = {}, m2 = {};
+  aggregate(rows, catCol, v1Col, agg).forEach(([k, v]) => { m1[k] = v; });
+  aggregate(rows, catCol, v2Col, agg).forEach(([k, v]) => { m2[k] = v; });
+  const cats = Object.keys(m1).filter(k => k in m2);
+  if (!cats.length) { holder.innerHTML = '<div class="bpreview-empty">No matching rows for both columns.</div>'; return; }
+  const all = cats.flatMap(c => [m1[c], m2[c]]);
+  let lo = Math.min(...all), hi = Math.max(...all); if (hi === lo) hi = lo + 1;
+  const pad = (hi - lo) * 0.1; lo -= pad; hi += pad;
+  const W = 900, H = 360, TOP = 30, BOT = 24, LX = 150, RX = W - 150;
+  const y = v => TOP + (1 - (v - lo) / (hi - lo)) * (H - TOP - BOT);
+  const UP = '#2ea043', DOWN = '#e5534b';
+  const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
+  const txt = textColor(), grid = gridColor() || '#ddd';
+  const wrap = document.createElement('div'); wrap.className = 'gantt-scroll';
+  const svg = _mkSvg(W, H);
+  const tip = document.createElement('div'); tip.className = 'map-tooltip'; tip.style.display = 'none';
+  // axis lines + headers
+  svg.appendChild(_mkEl('line', { x1: LX, y1: TOP - 6, x2: LX, y2: H - BOT, stroke: grid, 'stroke-width': 1 }));
+  svg.appendChild(_mkEl('line', { x1: RX, y1: TOP - 6, x2: RX, y2: H - BOT, stroke: grid, 'stroke-width': 1 }));
+  const h1 = _mkEl('text', { x: LX, y: 16, fill: txt, 'font-size': 11, 'text-anchor': 'middle', 'font-weight': 600 }); h1.textContent = v1Col; svg.appendChild(h1);
+  const h2 = _mkEl('text', { x: RX, y: 16, fill: txt, 'font-size': 11, 'text-anchor': 'middle', 'font-weight': 600 }); h2.textContent = v2Col; svg.appendChild(h2);
+  cats.forEach((c, i) => {
+    const v1 = m1[c], v2 = m2[c], color = v2 >= v1 ? UP : DOWN;
+    const match = !q || String(c).toLowerCase().includes(q);
+    const op = match ? 1 : 0.15;
+    svg.appendChild(_mkEl('line', { x1: LX, y1: y(v1), x2: RX, y2: y(v2), stroke: color, 'stroke-width': 2, opacity: op }));
+    [[LX, v1], [RX, v2]].forEach(([px, v]) => svg.appendChild(_mkEl('circle', { cx: px, cy: y(v), r: 3.5, fill: color, opacity: op })));
+    const nm = String(c), lab = nm.length > 16 ? nm.slice(0, 15) + '…' : nm;
+    const lL = _mkEl('text', { x: LX - 10, y: y(v1) + 3, fill: txt, 'font-size': 10, 'text-anchor': 'end', opacity: op }); lL.textContent = `${lab} ${fmtNum(v1)}`; svg.appendChild(lL);
+    const lR = _mkEl('text', { x: RX + 10, y: y(v2) + 3, fill: txt, 'font-size': 10, 'text-anchor': 'start', opacity: op }); lR.textContent = `${fmtNum(v2)} ${lab}`; svg.appendChild(lR);
+  });
+  wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
+}
+
+/* =====================================================================
+   Bump / Ranking chart — rank of each series (Group) over periods (X),
+   by value (Y). Rank 1 (highest value) is drawn on top. Lines show how
+   rankings change over time. Integrates time-range, search & theme.
+   ===================================================================== */
+function renderBump(w, container, rows) {
+  const holder = _svgHolder(w, container, 'bump-holder');
+  const xCol = w.x, sCol = w.group, vCol = w.y;
+  if (!xCol || !sCol || !vCol) { holder.innerHTML = '<div class="bpreview-empty">Pick <b>X</b> = period, <b>Group by</b> = series, <b>Y</b> = value.</div>'; return; }
+  const periods = [...new Set(rows.map(r => r[xCol]).filter(v => v != null))].sort();
+  const seriesSet = [...new Set(rows.map(r => r[sCol]).filter(v => v != null).map(String))];
+  if (periods.length < 2 || !seriesSet.length) { holder.innerHTML = '<div class="bpreview-empty">Need at least 2 periods and 1 series.</div>'; return; }
+  // value per (period, series)
+  const val = {};
+  rows.forEach(r => { const p = r[xCol], s = r[sCol] == null ? null : String(r[sCol]); if (p == null || s == null) return; const k = p + '\u0000' + s; val[k] = (val[k] || 0) + (+r[vCol] || 0); });
+  // rank per period
+  const rankOf = {};   // period -> {series -> rank}
+  periods.forEach(p => {
+    const arr = seriesSet.map(s => ({ s, v: val[p + '\u0000' + s] })).filter(o => o.v != null).sort((a, b) => b.v - a.v);
+    const rk = {}; arr.forEach((o, idx) => rk[o.s] = idx + 1); rankOf[p] = rk;
+  });
+  const maxRank = Math.max(...periods.map(p => Object.keys(rankOf[p]).length), 1);
+  const W = 900, H = Math.max(220, 40 + maxRank * 34), LEFT = 40, RIGHT = 150, TOP = 26, BOT = 24;
+  const plotW = W - LEFT - RIGHT;
+  const x = i => LEFT + (periods.length === 1 ? 0 : i / (periods.length - 1) * plotW);
+  const y = rk => TOP + (rk - 1) / Math.max(1, maxRank - 1) * (H - TOP - BOT);
+  const colors = pal(w.theme);
+  const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
+  const txt = textColor(), grid = gridColor() || '#ddd';
+  const wrap = document.createElement('div'); wrap.className = 'gantt-scroll';
+  const svg = _mkSvg(W, H);
+  const tip = document.createElement('div'); tip.className = 'map-tooltip'; tip.style.display = 'none';
+  // period labels
+  periods.forEach((p, i) => { const t = _mkEl('text', { x: x(i), y: 14, fill: txt, 'font-size': 10, 'text-anchor': i === 0 ? 'start' : (i === periods.length - 1 ? 'end' : 'middle') }); t.textContent = String(p); svg.appendChild(t); });
+  seriesSet.forEach((s, si) => {
+    const color = colors[si % colors.length];
+    const match = !q || s.toLowerCase().includes(q);
+    const op = match ? 1 : 0.12;
+    const pts = periods.map((p, i) => rankOf[p][s] != null ? { i, rk: rankOf[p][s], p } : null).filter(Boolean);
+    if (!pts.length) return;
+    const dAttr = pts.map((pt, k) => (k ? 'L' : 'M') + x(pt.i) + ' ' + y(pt.rk)).join(' ');
+    svg.appendChild(_mkEl('path', { d: dAttr, fill: 'none', stroke: color, 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: op }));
+    pts.forEach(pt => {
+      const c = _mkEl('circle', { cx: x(pt.i), cy: y(pt.rk), r: 4, fill: color, opacity: op });
+      c.addEventListener('mousemove', ev => { const r = holder.getBoundingClientRect(); tip.style.display = 'block'; tip.style.left = (ev.clientX - r.left + 12) + 'px'; tip.style.top = (ev.clientY - r.top + 12) + 'px'; tip.innerHTML = `<b>${escapeHtml(s)}</b><br>${escapeHtml(String(pt.p))}: rang #${pt.rk}<br><span style="opacity:.7">${escapeHtml(fmtNum(val[pt.p + '\u0000' + s]))}</span>`; });
+      c.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      svg.appendChild(c);
+    });
+    const last = pts[pts.length - 1];
+    const lab = _mkEl('text', { x: x(last.i) + 10, y: y(last.rk) + 3, fill: txt, 'font-size': 10, 'text-anchor': 'start', opacity: op }); lab.textContent = `#${last.rk} ${s.length > 16 ? s.slice(0, 15) + '…' : s}`; svg.appendChild(lab);
+  });
   wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
 }
 
@@ -3094,8 +3266,59 @@ function exportWidget(w) {
     download(url, (w.title||'chart')+'.png');
     return;
   }
-  // KPI/table — render the DOM node to canvas via simple snapshot fallback
-  toast('Export available for chart widgets (KPI/Table not a canvas)', true);
+  // SVG-based types (world map, calendar, gantt, box, sankey, bullet, slope, bump)
+  const svg = document.querySelector('#body-'+w.id+' svg');
+  if (svg) { exportSvgPng(svg, (w.title||'chart')+'.png'); return; }
+  // KPI/table — no canvas/SVG to snapshot
+  toast('PNG export needs a chart. Use ⤓ to export this data as CSV.', true);
+}
+// Serialize an inline SVG to a PNG download (additive; used by exportWidget).
+function exportSvgPng(svg, name) {
+  try {
+    const clone = svg.cloneNode(true);
+    const vb = (svg.getAttribute('viewBox') || '0 0 900 400').split(/\s+/).map(Number);
+    const W = vb[2] || svg.clientWidth || 900, H = vb[3] || svg.clientHeight || 400;
+    clone.setAttribute('width', W); clone.setAttribute('height', H);
+    const xml = new XMLSerializer().serializeToString(clone);
+    const url64 = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)));
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas'); c.width = W * 2; c.height = H * 2;
+      const ctx = c.getContext('2d'); ctx.scale(2, 2);
+      const bg = (getComputedStyle(document.body).getPropertyValue('--panel') || '#ffffff').trim();
+      ctx.fillStyle = bg || '#ffffff'; ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(img, 0, 0, W, H);
+      download(c.toDataURL('image/png'), name);
+    };
+    img.onerror = () => toast('PNG export failed for this chart', true);
+    img.src = url64;
+  } catch (e) { toast('Export failed: ' + e.message, true); }
+}
+// Export the widget's underlying data as a CSV file (works for every type).
+function exportWidgetCSV(w) {
+  const ds = (w.savedDataset && w.savedDataset.rows && w.savedDataset.rows.length) ? w.savedDataset : dataset;
+  if (!ds || !ds.rows || !ds.rows.length) { toast('No data to export', true); return; }
+  const cols = ds.columns;
+  const esc = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  const lines = [cols.map(esc).join(',')].concat(ds.rows.map(r => cols.map(c => esc(r[c])).join(',')));
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  download(url, (w.title || 'data') + '.csv');
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+// Clone a widget (config + its own dataset) and insert it right after.
+function duplicateWidget(w) {
+  const arr = widgets();
+  const clone = JSON.parse(JSON.stringify(w));
+  clone.id = uid();
+  clone.title = (w.title || 'Graph') + ' (copy)';
+  delete clone._perm;
+  const i = arr.findIndex(x => x.id === w.id);
+  arr.splice(i < 0 ? arr.length : i + 1, 0, clone);
+  renderGrid(); saveStateNow();
+  const el = document.querySelector(`.widget[data-id="${clone.id}"]`);
+  if (el) { el.classList.add('card-enter'); el.addEventListener('animationend', () => el.classList.remove('card-enter'), { once: true }); el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  toast('Graph duplicated');
 }
 function download(url, name) {
   const a=document.createElement('a'); a.href=url; a.download=name; a.click();
@@ -3459,6 +3682,13 @@ function renderBuilderForm() {
       <div class="bfield"><label>Target column</label><select class="binput" id="bSankeyTarget">${cols.length ? opt(cols, d.sankeyTarget || d.group) : '<option value="">— load data first —</option>'}</select></div>
     </div>
     <div class="bhint">Flux = <b>Source</b> → <b>Cible</b>, pondéré par « Y / Value » (ou le nombre de lignes si vide). Ex : source de réservation → statut final.</div>` : ''}
+    ${d.type === 'bullet' ? `
+    <div class="bfield"><label>Target column (objectif)</label><select class="binput" id="bBulletTarget">${cols.length ? optBlank(cols, d.bulletTarget) : '<option value="">— none —</option>'}</select></div>
+    <div class="bhint">« X / Label » = catégorie, « Y / Value » = valeur mesurée. <b>Target</b> = colonne objectif (trait de repère). Une barre par catégorie.</div>` : ''}
+    ${d.type === 'slope' ? `
+    <div class="bfield"><label>Second value column (après)</label><select class="binput" id="bSlopeEnd">${cols.length ? optBlank(cols, d.slopeEnd) : '<option value="">— none —</option>'}</select></div>
+    <div class="bhint">« X / Label » = série, « Y / Value » = valeur <b>avant</b>, la 2ᵉ colonne = valeur <b>après</b>. Une ligne en pente par série.</div>` : ''}
+    ${d.type === 'bump' ? `<div class="bhint">« X / Label » = période (temps), <b>Group by</b> = série (ce qu'on classe), « Y / Value » = valeur. Le classement est recalculé à chaque période.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
@@ -3488,13 +3718,14 @@ function renderBuilderForm() {
   bind('#bX', 'x'); bind('#bY', 'y'); bind('#bGroup', 'group'); bind('#bAgg', 'agg'); bind('#bTheme', 'theme'); bind('#bCountry', 'country'); bind('#bLinkCountry', 'linkCountry');
   bind('#bGanttStart', 'ganttStart'); bind('#bGanttEnd', 'ganttEnd');
   bind('#bSankeySource', 'sankeySource'); bind('#bSankeyTarget', 'sankeyTarget');
+  bind('#bBulletTarget', 'bulletTarget'); bind('#bSlopeEnd', 'slopeEnd');
   if (THRESHOLD_TYPES.includes(d.type)) {
     renderThresholdRows();
     $('#bAddThreshold').onclick = () => { d.thresholds = d.thresholds || []; d.thresholds.push({ op: 'lt', value: 0, color: '#e24b4a' }); renderThresholdRows(); builderPreview(); };
   }
   builderPreview();
 }
-const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap','calendar','waterfall'];
+const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap','calendar','waterfall','bullet'];
 function renderThresholdRows() {
   const wrap = $('#bThresholds'); if (!wrap) return;
   const d = builderDraft; d.thresholds = d.thresholds || [];
@@ -3582,6 +3813,9 @@ function builderPreview() {
     if (builderDataset) dataset = prev;
     return;
   }
+  if (d.type === 'bullet') { renderBullet(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'slope') { renderSlope(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'bump') { renderBump(d, holder, rows); if (builderDataset) dataset = prev; return; }
   try {
     const c = document.createElement('canvas');
     holder.appendChild(c);
