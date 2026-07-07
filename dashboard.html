@@ -558,7 +558,7 @@ select.input { cursor: pointer; }
 .gantt-scroll { width: 100%; height: 100%; overflow: auto; color: var(--text); }
 .box-holder { position: relative; }
 .sankey-holder { position: relative; }
-.bullet-holder, .slope-holder, .bump-holder { position: relative; }
+.bullet-holder, .slope-holder, .bump-holder, .radial-holder, .combo-holder { position: relative; }
 #mapFilterBar { margin: 0 0 12px; }
 .mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
 .mapfilter-chip .mf-x { cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 13px; line-height: 1; border: none; }
@@ -628,6 +628,24 @@ select.input { cursor: pointer; }
 /* ===== Card entrance (Issue 9) ===== */
 @keyframes cardEnter { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .card-enter { animation: cardEnter 250ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* ===== Grid liveliness (additive) ===== */
+.widget { transition: transform .18s ease, box-shadow .18s ease; }
+.widget:hover { transform: translateY(-3px); box-shadow: 0 14px 34px rgba(16,24,40,0.14); }
+.widget.maximized:hover { transform: none; }             /* don't lift the fullscreen card */
+@keyframes gridStagger { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.grid-stagger { animation: gridStagger .38s cubic-bezier(0.16,1,0.3,1) both; }
+@keyframes svgFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.chart-holder > .gantt-scroll, .map-holder svg, .chart-holder > svg { animation: svgFadeIn .45s ease both; }
+@media (prefers-reduced-motion: reduce) {
+  .grid-stagger, .chart-holder > .gantt-scroll, .map-holder svg, .chart-holder > svg { animation: none; }
+  .widget, .widget:hover { transition: none; transform: none; }
+}
+
+/* ===== "View all graphs" reveal button ===== */
+.viewall-wrap { grid-column: 1 / -1; display: flex; justify-content: center; padding: 4px 0 10px; }
+.viewall-btn { border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--accent); border-radius: 999px; padding: 9px 22px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: filter .15s, transform .12s; }
+.viewall-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
 
 /* data table widget */
 .dt-wrap { width: 100%; overflow: auto; max-height: 320px; }
@@ -1300,9 +1318,10 @@ const CHART_TYPES = [
   ['funnel','Funnel'],['pyramid','Pyramid'],['progress','Progress Bars'],
   ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],['gantt','Gantt / Timeline'],['boxplot','Box Plot'],['sankey','Sankey Diagram'],
   ['bullet','Bullet (vs target)'],['slope','Slope Chart'],['bump','Bump / Ranking'],
+  ['combo','Combo (Bar + Line)'],['pareto','Pareto'],['radialbar','Radial Bars'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', boxplot:'📦', sankey:'🔀', bullet:'🎯', slope:'📈', bump:'🏆', kpi:'🔢', table:'▦', histogram:'📐' };
+const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', boxplot:'📦', sankey:'🔀', bullet:'🎯', slope:'📈', bump:'🏆', combo:'📊', pareto:'📉', radialbar:'🛞', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -1867,26 +1886,49 @@ function renderGrid() {
       <button class="btn primary" onclick="openBuilder()">Create your first graph</button></div>`;
     return;
   }
-  ws.forEach((w, i) => grid.appendChild(buildWidget(w, i)));
+  ws.forEach((w, i) => {
+    const el = buildWidget(w, i);
+    // staggered entrance so the dashboard "builds itself" instead of popping
+    el.classList.add('grid-stagger');
+    el.style.animationDelay = Math.min(i * 55, 500) + 'ms';
+    el.addEventListener('animationend', () => { el.classList.remove('grid-stagger'); el.style.animationDelay = ''; }, { once: true });
+    grid.appendChild(el);
+  });
   ws.forEach(w => renderWidgetBody(w));
   renderMapFilterChip();   // show/hide the "Filtered by country" chip
   filterGraphs();   // re-apply the "find graph" filter after a rebuild
 }
 
 // Show only widgets whose title matches the "Find graph" box.
+// With no search, preview only the first few graphs + a "View all" button.
+const GRAPHS_PREVIEW_COUNT = 6;
+let showAllGraphs = false;
 function filterGraphs() {
   const inp = $('#graphSearch'); if (!inp) return;
   const q = inp.value.trim().toLowerCase();
-  let shown = 0;
+  const typeLabel = t => (CHART_TYPES.find(([v]) => v === t) || ['', ''])[1].toLowerCase();
+  let shown = 0, hiddenByCap = 0;
   widgets().forEach(w => {
     const el = document.querySelector(`.widget[data-id="${w.id}"]`);
     if (!el) return;
-    const match = !q || (w.title || '').toLowerCase().includes(q);
-    el.style.display = match ? '' : 'none';
-    if (match) shown++;
+    // match by title OR chart-type label (e.g. "pie", "world map")
+    const match = !q || (w.title || '').toLowerCase().includes(q) || typeLabel(w.type).includes(q);
+    let visible = match;
+    if (visible && !q && !showAllGraphs && shown >= GRAPHS_PREVIEW_COUNT) { visible = false; hiddenByCap++; }
+    el.style.display = visible ? '' : 'none';
+    if (visible) shown++;
   });
-  // optional "no match" note
   const grid = $('#grid'); if (!grid) return;
+  // "View all graphs" / "Show less" toggle (only when no search is active)
+  let vw = grid.querySelector('.viewall-wrap');
+  const total = widgets().length;
+  if (!q && (hiddenByCap > 0 || (showAllGraphs && total > GRAPHS_PREVIEW_COUNT))) {
+    if (!vw) { vw = document.createElement('div'); vw.className = 'viewall-wrap'; grid.appendChild(vw); }
+    vw.innerHTML = `<button class="viewall-btn">${showAllGraphs ? '▲ Show less' : `▼ View all ${total} graphs`}</button>`;
+    vw.querySelector('button').onclick = () => { showAllGraphs = !showAllGraphs; filterGraphs(); };
+    grid.appendChild(vw);   // keep it after the last card
+  } else if (vw) vw.remove();
+  // optional "no match" note
   let note = grid.querySelector('.graph-filter-empty');
   if (q && shown === 0 && widgets().length) {
     if (!note) { note = document.createElement('div'); note.className = 'empty-canvas graph-filter-empty'; grid.appendChild(note); }
@@ -2132,6 +2174,9 @@ function renderWidgetBody(w) {
     if (w.type==='bullet') { renderBullet(w, body, rows); dataset = prevDs; return; }
     if (w.type==='slope') { renderSlope(w, body, rows); dataset = prevDs; return; }
     if (w.type==='bump') { renderBump(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='combo') { renderCombo(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='pareto') { renderPareto(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='radialbar') { renderRadialBar(w, body, rows); dataset = prevDs; return; }
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
@@ -2155,6 +2200,10 @@ function textColor(){ return getComputedStyle(document.body).getPropertyValue('-
 function baseOpts(extra={}) {
   return Object.assign({
     responsive:true, maintainAspectRatio:false,
+    // Staggered entrance: each point/bar pops in slightly after the previous one.
+    animation:{ duration:750, easing:'easeOutQuart',
+      delay: ctx => (ctx.type==='data' && ctx.mode==='default')
+        ? Math.min(ctx.dataIndex*35, 550) + (ctx.datasetIndex||0)*80 : 0 },
     plugins:{ legend:{ labels:{ color:textColor(), font:{family:'Inter'} } } },
     scales: undefined
   }, extra);
@@ -3207,6 +3256,104 @@ function renderBump(w, container, rows) {
   wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
 }
 
+/* =====================================================================
+   Combo chart — bars (Y) + a line (comboLine) on a secondary axis.
+   Chart.js mixed chart; honours aggregate(), thresholds (bar colors),
+   time-range, theme and the animation stagger from baseOpts().
+   ===================================================================== */
+function renderCombo(w, container, rows) {
+  const holder = _svgHolder(w, container, 'combo-holder');
+  if (!w.x || !w.y) { holder.innerHTML = '<div class="bpreview-empty">Pick <b>X</b> and <b>Y</b> (bars), plus a <b>Line column</b>.</div>'; return; }
+  const agg = w.agg || 'sum';
+  const bars = aggregate(rows, w.x, w.y, agg);
+  const labels = bars.map(([k]) => k);
+  const lineMap = {};
+  if (w.comboLine) aggregate(rows, w.x, w.comboLine, agg).forEach(([k, v]) => { lineMap[k] = v; });
+  const colors = pal(w.theme);
+  const th = (w.thresholds && w.thresholds.length) ? w.thresholds : null;
+  const barColors = bars.map(([, v], i) => th ? colorForValue(v, th, colors[0]) : colors[0]);
+  const datasets = [{ type: 'bar', label: w.y, data: bars.map(([, v]) => v), backgroundColor: barColors, borderRadius: 5, order: 2 }];
+  if (w.comboLine) datasets.push({ type: 'line', label: w.comboLine, data: labels.map(k => lineMap[k] ?? null), borderColor: colors[1] || '#00b3a4', backgroundColor: (colors[1] || '#00b3a4') + '33', tension: .35, pointRadius: 3, yAxisID: 'y1', order: 1 });
+  const canvas = document.createElement('canvas'); holder.appendChild(canvas);
+  const opts = baseOpts({ scales: Object.assign(axisOpts(), w.comboLine ? { y1: { position: 'right', ticks: { color: textColor(), font: { size: 10 } }, grid: { drawOnChartArea: false } } } : {}) });
+  const chart = new Chart(canvas.getContext('2d'), { data: { labels, datasets }, options: opts });
+  if (container.id === 'builderPreview') builderChart = chart; else charts[w.id] = chart;
+}
+
+/* =====================================================================
+   Pareto chart — bars sorted descending + cumulative-% line (0–100 on
+   the right axis). Classic "which few categories cause most of the
+   total" view. Chart.js; integrates aggregate/thresholds/time-range.
+   ===================================================================== */
+function renderPareto(w, container, rows) {
+  const holder = _svgHolder(w, container, 'combo-holder');
+  if (!w.x || !w.y) { holder.innerHTML = '<div class="bpreview-empty">Pick <b>X</b> (category) and <b>Y</b> (value).</div>'; return; }
+  const vals = aggregate(rows, w.x, w.y, w.agg || 'sum').slice().sort((a, b) => b[1] - a[1]);
+  if (!vals.length) { holder.innerHTML = '<div class="bpreview-empty">No data to plot.</div>'; return; }
+  const total = vals.reduce((s, [, v]) => s + v, 0) || 1;
+  let run = 0;
+  const cum = vals.map(([, v]) => { run += v; return +(run / total * 100).toFixed(1); });
+  const colors = pal(w.theme);
+  const th = (w.thresholds && w.thresholds.length) ? w.thresholds : null;
+  const canvas = document.createElement('canvas'); holder.appendChild(canvas);
+  const chart = new Chart(canvas.getContext('2d'), {
+    data: {
+      labels: vals.map(([k]) => k),
+      datasets: [
+        { type: 'bar', label: w.y, data: vals.map(([, v]) => v), backgroundColor: vals.map(([, v], i) => th ? colorForValue(v, th, colors[i % colors.length]) : colors[i % colors.length]), borderRadius: 5, order: 2 },
+        { type: 'line', label: 'Cumulative %', data: cum, borderColor: colors[1] || '#e5534b', pointRadius: 3, tension: .25, yAxisID: 'y1', order: 1 }
+      ]
+    },
+    options: baseOpts({ scales: Object.assign(axisOpts(), { y1: { position: 'right', min: 0, max: 100, ticks: { color: textColor(), font: { size: 10 }, callback: v => v + '%' }, grid: { drawOnChartArea: false } } }) })
+  });
+  if (container.id === 'builderPreview') builderChart = chart; else charts[w.id] = chart;
+}
+
+/* =====================================================================
+   Radial Bars — concentric animated rings, one per category; arc length
+   = value relative to the max (270° = biggest). SVG, animated via CSS
+   stroke-dasharray transition. Integrates aggregate/search/theme.
+   ===================================================================== */
+function renderRadialBar(w, container, rows) {
+  const holder = _svgHolder(w, container, 'radial-holder');
+  if (!w.x || !w.y) { holder.innerHTML = '<div class="bpreview-empty">Pick <b>X</b> (category) and <b>Y</b> (value).</div>'; return; }
+  let vals = aggregate(rows, w.x, w.y, w.agg || 'sum').slice().sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (!vals.length) { holder.innerHTML = '<div class="bpreview-empty">No data to plot.</div>'; return; }
+  const maxV = Math.max(...vals.map(([, v]) => v), 1);
+  const W = 460, H = 360, CX = 175, CY = H / 2;
+  const colors = pal(w.theme);
+  const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
+  const txt = textColor(), neutral = (getComputedStyle(document.body).getPropertyValue('--panel-2').trim()) || '#eee';
+  const wrap = document.createElement('div'); wrap.className = 'gantt-scroll';
+  const svg = _mkSvg(W, H);
+  const tip = document.createElement('div'); tip.className = 'map-tooltip'; tip.style.display = 'none';
+  const ringW = Math.min(16, Math.floor(130 / vals.length) - 3);
+  vals.forEach(([cat, v], i) => {
+    const r = 150 - i * (ringW + 4);
+    if (r < 14) return;
+    const C = 2 * Math.PI * r;
+    const frac = Math.max(0.005, (v / maxV) * 0.75);   // 270° max sweep
+    const color = colors[i % colors.length];
+    const match = !q || String(cat).toLowerCase().includes(q);
+    const op = match ? 1 : 0.18;
+    // track + value arc (starts at 12 o'clock)
+    const mk = (stroke, dash, o) => { const c = _mkEl('circle', { cx: CX, cy: CY, r, fill: 'none', stroke, 'stroke-width': ringW, 'stroke-linecap': 'round', 'stroke-dasharray': dash, transform: `rotate(-90 ${CX} ${CY})`, opacity: o }); return c; };
+    svg.appendChild(mk(neutral, `${C * 0.75} ${C}`, op * 0.5));
+    const arc = mk(color, `0 ${C}`, op);
+    requestAnimationFrame(() => { arc.style.transition = `stroke-dasharray .9s cubic-bezier(.16,1,.3,1) ${i * 90}ms`; arc.setAttribute('stroke-dasharray', `${C * frac} ${C}`); });
+    arc.addEventListener('mousemove', ev => { const rc = holder.getBoundingClientRect(); tip.style.display = 'block'; tip.style.left = (ev.clientX - rc.left + 12) + 'px'; tip.style.top = (ev.clientY - rc.top + 12) + 'px'; tip.innerHTML = `<b>${escapeHtml(String(cat))}</b><br>${escapeHtml(fmtNum(v))} <span style="opacity:.65">(${Math.round(v / maxV * 100)}% of max)</span>`; });
+    arc.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    svg.appendChild(arc);
+    // legend
+    const ly = 30 + i * 22;
+    svg.appendChild(_mkEl('rect', { x: 345, y: ly - 9, width: 11, height: 11, rx: 3, fill: color, opacity: op }));
+    const nm = String(cat), lab = _mkEl('text', { x: 362, y: ly, fill: txt, 'font-size': 10.5, opacity: op });
+    lab.textContent = `${nm.length > 11 ? nm.slice(0, 10) + '…' : nm} · ${fmtNum(v)}`;
+    svg.appendChild(lab);
+  });
+  wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
+}
+
 function renderTable(w, body, rows) {
   const cols = dataset.columns;
   const wrap = document.createElement('div'); wrap.className='dt-wrap';
@@ -3689,6 +3836,11 @@ function renderBuilderForm() {
     <div class="bfield"><label>Second value column (après)</label><select class="binput" id="bSlopeEnd">${cols.length ? optBlank(cols, d.slopeEnd) : '<option value="">— none —</option>'}</select></div>
     <div class="bhint">« X / Label » = série, « Y / Value » = valeur <b>avant</b>, la 2ᵉ colonne = valeur <b>après</b>. Une ligne en pente par série.</div>` : ''}
     ${d.type === 'bump' ? `<div class="bhint">« X / Label » = période (temps), <b>Group by</b> = série (ce qu'on classe), « Y / Value » = valeur. Le classement est recalculé à chaque période.</div>` : ''}
+    ${d.type === 'combo' ? `
+    <div class="bfield"><label>Line column (axe droit)</label><select class="binput" id="bComboLine">${cols.length ? optBlank(cols, d.comboLine) : '<option value="">— none —</option>'}</select></div>
+    <div class="bhint">« Y / Value » = barres, <b>Line column</b> = ligne sur l'axe de droite (ex : ventes en barres + marge % en ligne).</div>` : ''}
+    ${d.type === 'pareto' ? `<div class="bhint">Barres triées de la plus grande à la plus petite + ligne du <b>% cumulé</b> — repère vite les catégories qui pèsent le plus (règle 80/20).</div>` : ''}
+    ${d.type === 'radialbar' ? `<div class="bhint">Anneaux concentriques animés — un par catégorie (top 8), longueur d'arc proportionnelle à la valeur.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
@@ -3718,14 +3870,14 @@ function renderBuilderForm() {
   bind('#bX', 'x'); bind('#bY', 'y'); bind('#bGroup', 'group'); bind('#bAgg', 'agg'); bind('#bTheme', 'theme'); bind('#bCountry', 'country'); bind('#bLinkCountry', 'linkCountry');
   bind('#bGanttStart', 'ganttStart'); bind('#bGanttEnd', 'ganttEnd');
   bind('#bSankeySource', 'sankeySource'); bind('#bSankeyTarget', 'sankeyTarget');
-  bind('#bBulletTarget', 'bulletTarget'); bind('#bSlopeEnd', 'slopeEnd');
+  bind('#bBulletTarget', 'bulletTarget'); bind('#bSlopeEnd', 'slopeEnd'); bind('#bComboLine', 'comboLine');
   if (THRESHOLD_TYPES.includes(d.type)) {
     renderThresholdRows();
     $('#bAddThreshold').onclick = () => { d.thresholds = d.thresholds || []; d.thresholds.push({ op: 'lt', value: 0, color: '#e24b4a' }); renderThresholdRows(); builderPreview(); };
   }
   builderPreview();
 }
-const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap','calendar','waterfall','bullet'];
+const THRESHOLD_TYPES = ['bar','column','hbar','stacked','hstacked','stacked100','line','spline','step','sparkline','area','stackedArea','worldmap','calendar','waterfall','bullet','combo','pareto'];
 function renderThresholdRows() {
   const wrap = $('#bThresholds'); if (!wrap) return;
   const d = builderDraft; d.thresholds = d.thresholds || [];
@@ -3816,6 +3968,9 @@ function builderPreview() {
   if (d.type === 'bullet') { renderBullet(d, holder, rows); if (builderDataset) dataset = prev; return; }
   if (d.type === 'slope') { renderSlope(d, holder, rows); if (builderDataset) dataset = prev; return; }
   if (d.type === 'bump') { renderBump(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'combo') { renderCombo(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'pareto') { renderPareto(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'radialbar') { renderRadialBar(d, holder, rows); if (builderDataset) dataset = prev; return; }
   try {
     const c = document.createElement('canvas');
     holder.appendChild(c);
