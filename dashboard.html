@@ -642,6 +642,24 @@ select.input { cursor: pointer; }
   .widget, .widget:hover { transition: none; transform: none; }
 }
 
+/* ===== KPI summary strip (auto-computed from the loaded dataset) ===== */
+#summaryStrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 0 0 14px; }
+.sum-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 13px 16px; animation: gridStagger .35s cubic-bezier(.16,1,.3,1) both; }
+.sum-card .sc-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sum-card .sc-value { font-size: 22px; font-weight: 800; color: var(--text); line-height: 1.15; }
+.sum-card .sc-trend { margin-top: 4px; font-size: 11.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
+.sum-card .sc-trend.up { color: #2ea043; } .sum-card .sc-trend.down { color: #e5534b; }
+.sum-card .sc-trend .sc-vs { color: var(--text-dim); font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .sum-card { animation: none; } }
+
+/* ===== Loading skeleton (while dashboards/data are fetching) ===== */
+@keyframes skShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.sk-card { border: 1px solid var(--border); border-radius: 16px; background: var(--panel); padding: 16px; min-height: 230px; }
+.sk-line { height: 12px; border-radius: 6px; margin-bottom: 10px;
+  background: linear-gradient(90deg, var(--panel-2) 25%, color-mix(in srgb, var(--panel-2) 50%, var(--panel)) 50%, var(--panel-2) 75%);
+  background-size: 200% 100%; animation: skShimmer 1.3s linear infinite; }
+.sk-line.w40 { width: 40%; } .sk-line.w70 { width: 70%; } .sk-line.tall { height: 130px; margin-top: 16px; }
+
 /* ===== "View all graphs" reveal button ===== */
 .viewall-wrap { grid-column: 1 / -1; display: flex; justify-content: center; padding: 4px 0 10px; }
 .viewall-btn { border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); color: var(--accent); border-radius: 999px; padding: 9px 22px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: filter .15s, transform .12s; }
@@ -982,7 +1000,18 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
           <option value="3">Last 3 periods</option>
           <option value="6">Last 6 periods</option>
           <option value="12">Last 12 periods</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="90d">Last 90 days</option>
+          <option value="custom">Custom range…</option>
         </select>
+      </div>
+      <div class="field" id="customRangeField" style="display:none">
+        <label>From — To</label>
+        <div style="display:flex;gap:6px">
+          <input class="input" type="date" id="rangeFrom" style="min-width:130px">
+          <input class="input" type="date" id="rangeTo" style="min-width:130px">
+        </div>
       </div>
       <div class="field" id="dateColField" style="display:none">
         <label>Date Field</label>
@@ -1006,6 +1035,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       </div>
     </div>
 
+    <div id="summaryStrip" style="display:none"></div>
     <div id="mapFilterBar" style="display:none"></div>
     <div class="grid" id="grid"></div>
   </main>
@@ -1574,11 +1604,88 @@ function filteredRows() {
   const dc = $('#dateCol').value;
   const tr = $('#timeRange').value;
   if (dc && tr !== 'all' && dataset.columns.includes(dc)) {
-    const periods = [...new Set(rows.map(r=>r[dc]))].sort();
-    const keep = new Set(periods.slice(-(+tr)));
-    rows = rows.filter(r => keep.has(r[dc]));
+    if (/^\d+d$/.test(tr)) {
+      // "Last N days" — relative to the newest date in the data, so it also
+      // works on historical datasets.
+      const days = parseInt(tr);
+      const dates = rows.map(r => _parseDateVal(r[dc])).filter(Boolean);
+      if (dates.length) {
+        const max = Math.max(...dates.map(d => +d));
+        const from = max - days * 86400000;
+        rows = rows.filter(r => { const d = _parseDateVal(r[dc]); return d && +d > from && +d <= max; });
+      }
+    } else if (tr === 'custom') {
+      const f = $('#rangeFrom')?.value, t = $('#rangeTo')?.value;
+      const from = f ? +new Date(f + 'T00:00:00') : -Infinity;
+      const to = t ? +new Date(t + 'T23:59:59') : Infinity;
+      rows = rows.filter(r => { const d = _parseDateVal(r[dc]); return d && +d >= from && +d <= to; });
+    } else {
+      const periods = [...new Set(rows.map(r=>r[dc]))].sort();
+      const keep = new Set(periods.slice(-(+tr)));
+      rows = rows.filter(r => keep.has(r[dc]));
+    }
   }
   return rows;
+}
+
+/* =====================================================================
+   KPI summary strip — totals of the numeric columns over the current
+   time window, with % change vs the PREVIOUS window (arrows) when a
+   time filter is active. Purely additive; hidden when no data loaded.
+   ===================================================================== */
+function _prevWindowRows() {
+  const dc = $('#dateCol').value, tr = $('#timeRange').value;
+  if (!dc || tr === 'all' || tr === 'custom' || !dataset.columns.includes(dc)) return null;
+  const rows = dataset.rows;
+  if (/^\d+d$/.test(tr)) {
+    const days = parseInt(tr);
+    const dates = rows.map(r => _parseDateVal(r[dc])).filter(Boolean);
+    if (!dates.length) return null;
+    const max = Math.max(...dates.map(d => +d));
+    const from = max - days * 86400000, prevFrom = max - 2 * days * 86400000;
+    return rows.filter(r => { const d = _parseDateVal(r[dc]); return d && +d > prevFrom && +d <= from; });
+  }
+  const periods = [...new Set(rows.map(r => r[dc]))].sort();
+  const n = +tr;
+  const keep = new Set(periods.slice(-2 * n, -n));
+  return keep.size ? rows.filter(r => keep.has(r[dc])) : null;
+}
+function _countUp(el, target) {
+  const t0 = performance.now(), dur = 500, from = 0;
+  const step = now => {
+    const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = fmtNum(from + (target - from) * e);
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+function renderSummaryStrip() {
+  const strip = $('#summaryStrip'); if (!strip) return;
+  if (!dataset.rows.length) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+  const rows = filteredRows();
+  const nums = numericCols().slice(0, 4);
+  if (!rows.length || !nums.length) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+  const prev = _prevWindowRows();
+  const sum = (rs, c) => rs.reduce((s, r) => s + (+r[c] || 0), 0);
+  const cards = [{ label: 'Rows', value: rows.length, trend: prev ? rows.length - prev.length : null, prevVal: prev ? prev.length : 0 }];
+  nums.forEach(c => {
+    const cur = sum(rows, c);
+    const pv = prev ? sum(prev, c) : null;
+    cards.push({ label: 'Σ ' + c, value: cur, trend: pv != null ? cur - pv : null, prevVal: pv });
+  });
+  strip.style.display = '';
+  strip.innerHTML = cards.map((k, i) => {
+    let trend = '';
+    if (k.trend != null && k.prevVal) {
+      const pct = k.prevVal ? (k.trend / Math.abs(k.prevVal) * 100) : 0;
+      const up = k.trend >= 0;
+      trend = `<span class="sc-trend ${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${Math.abs(pct).toFixed(1)}% <span class="sc-vs">vs prev.</span></span>`;
+    }
+    return `<div class="sum-card" style="animation-delay:${i * 60}ms">
+      <div class="sc-label" title="${escapeHtml(k.label)}">${escapeHtml(k.label)}</div>
+      <div class="sc-value" data-target="${k.value}">0</div>${trend}</div>`;
+  }).join('');
+  strip.querySelectorAll('.sc-value').forEach(el => _countUp(el, +el.dataset.target));
 }
 
 /* =====================================================================
@@ -1875,6 +1982,18 @@ function deleteView(i){
   renderAll(); saveState();
 }
 
+// Shimmer placeholder cards shown while the dashboard state is fetching;
+// the first real renderGrid() wipes them (it resets grid.innerHTML).
+function showGridSkeleton(n = 3) {
+  const grid = $('#grid'); if (!grid || grid.children.length) return;
+  grid.innerHTML = Array.from({ length: n }, () => `
+    <div class="sk-card">
+      <div class="sk-line w40"></div>
+      <div class="sk-line w70"></div>
+      <div class="sk-line tall"></div>
+    </div>`).join('');
+}
+
 function renderGrid() {
   const grid = $('#grid');
   Object.values(charts).forEach(c=>{ try{c.destroy();}catch(e){} });
@@ -1895,6 +2014,7 @@ function renderGrid() {
     grid.appendChild(el);
   });
   ws.forEach(w => renderWidgetBody(w));
+  renderSummaryStrip();    // auto KPI cards above the grid
   renderMapFilterChip();   // show/hide the "Filtered by country" chip
   filterGraphs();   // re-apply the "find graph" filter after a rebuild
 }
@@ -4597,6 +4717,7 @@ async function initViewMode(token) {
   Chart.defaults.color = textColor();
   Chart.defaults.font.family = 'Inter';
   initState();
+  showGridSkeleton();   // shimmer while the shared dashboard fetches
   try {
     const d = await API.sharedDashboard(token);
     state.id = d.id; state.title = d.title;
@@ -4618,6 +4739,7 @@ function init() {
   initState();
   Chart.defaults.color = textColor();
   Chart.defaults.font.family = 'Inter';
+  showGridSkeleton();   // shimmer cards until the dashboard loads
 
   $('#dashTitle').value = state.title || 'Nexus Analytics';
 
@@ -4747,9 +4869,14 @@ function init() {
   window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
 
   // filters
-  $('#timeRange').onchange = ()=>{ renderGrid(); };
+  $('#timeRange').onchange = ()=>{
+    $('#customRangeField').style.display = $('#timeRange').value === 'custom' ? '' : 'none';
+    renderGrid();
+  };
+  $('#rangeFrom').onchange = ()=>{ renderGrid(); };
+  $('#rangeTo').onchange = ()=>{ renderGrid(); };
   $('#dateCol').onchange = ()=>{ renderGrid(); };
-  $('#clearFilters').onclick = ()=>{ $('#timeRange').value='all'; $('#globalSearch').value=''; $('#graphSearch').value=''; renderGrid(); };
+  $('#clearFilters').onclick = ()=>{ $('#timeRange').value='all'; $('#globalSearch').value=''; $('#graphSearch').value=''; $('#rangeFrom').value=''; $('#rangeTo').value=''; $('#customRangeField').style.display='none'; renderGrid(); };
   let searchTimer;
   $('#globalSearch').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ renderGrid(); },180); };
   $('#graphSearch').oninput = filterGraphs;   // filter which graphs are shown by title
