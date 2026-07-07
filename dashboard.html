@@ -642,6 +642,24 @@ select.input { cursor: pointer; }
   .widget, .widget:hover { transition: none; transform: none; }
 }
 
+/* ===== Home page — folder cards for dashboards ===== */
+#homePage { position: fixed; top: var(--toolbarH, 56px); left: 0; right: 0; bottom: 0; z-index: 48; background: var(--bg); overflow-y: auto; }
+body[data-viewmode="link"] #homeBtn, body[data-viewmode="link"] #homePage { display: none !important; }   /* public share links have no Home */
+.hp-inner { max-width: 1080px; margin: 0 auto; padding: 34px 24px 60px; }
+.hp-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+.hp-head h2 { margin: 0; font-size: 22px; font-weight: 800; color: var(--text); }
+.hp-back { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.hp-back:hover { border-color: var(--accent); color: var(--accent); }
+.hp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+.hp-card { text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; cursor: pointer; font-family: inherit; transition: transform .16s ease, box-shadow .16s ease, border-color .16s; animation: gridStagger .35s cubic-bezier(.16,1,.3,1) both; }
+.hp-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 14px 34px rgba(16,24,40,0.14); }
+.hp-card .hc-icon { font-size: 28px; line-height: 1; margin-bottom: 12px; }
+.hp-card .hc-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hp-card .hc-sub { font-size: 12px; color: var(--text-dim); }
+.hp-card.hc-new { border-style: dashed; display: grid; place-items: center; color: var(--accent); font-weight: 700; font-size: 14px; min-height: 118px; }
+.hp-empty { grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 40px 0; font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { .hp-card { animation: none; } }
+
 /* ===== KPI summary strip (auto-computed from the loaded dataset) ===== */
 #summaryStrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 0 0 14px; }
 .sum-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 13px 16px; animation: gridStagger .35s cubic-bezier(.16,1,.3,1) both; }
@@ -931,6 +949,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <!-- Left group: brand + dashboard name/picker -->
   <div class="tb-group tb-left">
     <div class="tb-logo">N</div>
+    <button class="btn ghost sm icon-only" id="homeBtn" title="Home — all dashboards">🏠</button>
     <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" title="Rename this dashboard">
     <div class="dash-menu" id="dashMenu">
       <button class="dash-menu-btn" id="dashMenuBtn" title="Switch dashboard" aria-haspopup="true"><span id="dashMenuLabel">Dashboard</span><span class="dm-arrow">▾</span></button>
@@ -989,6 +1008,17 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 
 <div class="layout">
 <!-- (data-source sidebar removed — data lives in the graph builder; Connect DB moved to the header) -->
+
+  <!-- ===== Home page (dashboard folders) ===== -->
+  <div id="homePage" style="display:none">
+    <div class="hp-inner">
+      <div class="hp-head">
+        <button class="hp-back" id="hpBack" style="display:none">‹ Back</button>
+        <h2 id="hpTitle">Home</h2>
+      </div>
+      <div class="hp-grid" id="hpGrid"></div>
+    </div>
+  </div>
 
   <!-- ===== Main canvas ===== -->
   <main class="main">
@@ -1817,7 +1847,7 @@ async function loadDashboards() {
     const { dashboards } = await API.listDashboards();
     dashboardsList = dashboards || [];
     if (dashboardsList.length) {
-      await openDashboard(dashboardsList[0].id);
+      showHomePage();   // land on the Home folders (My dashboards / users / shared)
     } else if (isEditorAcct()) {
       // Only editors/admins can create dashboards.
       const created = await API.createDashboard(state.title || 'My Dashboard', serializeState());
@@ -1827,16 +1857,19 @@ async function loadDashboards() {
       canEditCurrent = true; applyEditableUI();
       renderDashboardPicker();
       setSaveIndicator('saved');
+      showHomePage();   // first visit still lands on Home with the new dashboard
     } else {
       // Viewer with no granted graphs yet — show an empty read-only canvas.
       canEditCurrent = false; applyEditableUI();
       state.views = [{ name: 'Overview', widgets: [] }];
       renderAll();
+      showHomePage();
     }
   } catch (e) { console.warn('loadDashboards failed', e.message); }
 }
 
 async function openDashboard(id) {
+  hideHomePage();
   const d = await API.getDashboard(id);
   state.id = d.id;
   state.title = d.title;
@@ -1944,6 +1977,109 @@ async function renderDashMenu() {
   panel.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { dashMenuView = { level: b.dataset.go }; renderDashMenu(); });
   panel.querySelectorAll('[data-user]').forEach(b => b.onclick = () => { dashMenuView = { level: 'userDash', user: dmUsersCache.find(x => x.id === +b.dataset.user) }; renderDashMenu(); });
 }
+
+/* =====================================================================
+   Home page — folder cards. Admin: "My dashboards" + one card per user
+   (→ that user's dashboards). Regular user: "My dashboards" + "Shared
+   with me". Clicking a dashboard opens it and hides the home page.
+   ===================================================================== */
+let homeView = { level: 'root' };
+let hpUsersCache = [];
+async function showHomePage() {
+  homeView = { level: 'root' };
+  $('#homePage').style.display = '';
+  $('#hpGrid').innerHTML = '<div class="hp-empty">Loading…</div>';
+  try {
+    const { dashboards } = await API.listDashboards();   // fresh list every visit
+    dashboardsList = dashboards || [];
+  } catch (e) { /* keep the cached list */ }
+  renderHomePage();
+}
+function hideHomePage() { const hp = $('#homePage'); if (hp) hp.style.display = 'none'; }
+async function renderHomePage() {
+  const grid = $('#hpGrid'), title = $('#hpTitle'), back = $('#hpBack');
+  const esc = escapeHtml;
+  const openDash = id => { hideHomePage(); openDashboard(id); };
+  const dashCard = (d, i, showOwner) => `
+    <button class="hp-card" data-open="${d.id}" style="animation-delay:${Math.min(i * 45, 400)}ms">
+      <div class="hc-icon">📊</div>
+      <div class="hc-title" title="${esc(d.title)}">${esc(d.title)}</div>
+      <div class="hc-sub">${showOwner ? esc(d.owner_name || d.owner_email || '') + ' · ' : ''}${d.updated_at ? new Date(d.updated_at).toLocaleDateString() : ''}</div>
+    </button>`;
+
+  if (homeView.level === 'root') {
+    title.textContent = currentUser ? `Welcome, ${currentUser.name || currentUser.email}` : 'Home';
+    back.style.display = 'none';
+    const mine = dashboardsList.filter(d => d.mine);
+    let html = `
+      <button class="hp-card" data-folder="mine" style="animation-delay:0ms">
+        <div class="hc-icon">🗂️</div>
+        <div class="hc-title">My dashboards</div>
+        <div class="hc-sub">${mine.length} dashboard${mine.length === 1 ? '' : 's'}</div>
+      </button>`;
+    if (isAdmin()) {
+      grid.innerHTML = html + '<div class="hp-empty">Loading users…</div>';
+      try { const { users } = await API.adminUsers(); hpUsersCache = users || []; }
+      catch (e) { hpUsersCache = []; }
+      const others = hpUsersCache.filter(u => !currentUser || u.id !== currentUser.id);
+      html += others.map((u, i) => {
+        const n = dashboardsList.filter(d => d.owner_id === u.id).length;   // admin list = ALL dashboards
+        return `
+        <button class="hp-card" data-userfolder="${u.id}" style="animation-delay:${Math.min((i + 1) * 45, 400)}ms">
+          <div class="hc-icon">👤</div>
+          <div class="hc-title" title="${esc(u.name || u.email)}">${esc(u.name || u.email)}</div>
+          <div class="hc-sub">${n} dashboard${n === 1 ? '' : 's'}</div>
+        </button>`;
+      }).join('');
+      if (!others.length) html += '<div class="hp-empty">No other users yet.</div>';
+    } else {
+      const shared = dashboardsList.filter(d => !d.mine);
+      html += `
+      <button class="hp-card" data-folder="shared" style="animation-delay:45ms">
+        <div class="hc-icon">🤝</div>
+        <div class="hc-title">Shared with me</div>
+        <div class="hc-sub">${shared.length} dashboard${shared.length === 1 ? '' : 's'}</div>
+      </button>`;
+    }
+    grid.innerHTML = html;
+  } else if (homeView.level === 'list') {
+    title.textContent = homeView.title;
+    back.style.display = '';
+    const ds = homeView.dashboards || [];
+    let html = ds.map((d, i) => dashCard(d, i, homeView.showOwner)).join('');
+    if (homeView.canCreate && isEditorAcct())
+      html += `<button class="hp-card hc-new" data-newdash="1" style="animation-delay:${Math.min(ds.length * 45, 400)}ms">＋ New dashboard</button>`;
+    if (!ds.length && !homeView.canCreate) html += '<div class="hp-empty">No dashboards here yet.</div>';
+    grid.innerHTML = html;
+  }
+
+  grid.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openDash(b.dataset.open));
+  grid.querySelectorAll('[data-folder]').forEach(b => b.onclick = () => {
+    const kind = b.dataset.folder;
+    const mine = kind === 'mine';
+    homeView = {
+      level: 'list',
+      title: mine ? 'My dashboards' : 'Shared with me',
+      dashboards: dashboardsList.filter(d => mine ? d.mine : !d.mine),
+      canCreate: mine, showOwner: !mine
+    };
+    renderHomePage();
+  });
+  grid.querySelectorAll('[data-userfolder]').forEach(b => b.onclick = () => {
+    const u = hpUsersCache.find(x => x.id === +b.dataset.userfolder);
+    homeView = {
+      level: 'list',
+      title: (u && (u.name || u.email)) || 'User',
+      dashboards: dashboardsList.filter(d => d.owner_id === +b.dataset.userfolder),
+      canCreate: false, showOwner: false
+    };
+    renderHomePage();
+  });
+  const nd = grid.querySelector('[data-newdash]');
+  if (nd) nd.onclick = async () => { hideHomePage(); await createDashboard(); };
+  back.onclick = () => { homeView = { level: 'root' }; renderHomePage(); };
+}
+window.showHomePage = showHomePage;
 
 /* =====================================================================
    Rendering: widgets
@@ -4787,6 +4923,7 @@ function init() {
     try { await API.logout(); } catch(e) {}
     location.href = '/login';
   };
+  $('#homeBtn').onclick = () => showHomePage();
   // Toolbar overflow (⋯) + user-avatar dropdown
   $('#overflowBtn').onclick = (e) => { e.stopPropagation(); $('#userDropdown').classList.remove('open'); $('#notifDropdown')?.classList.remove('open'); $('#tbSecondary').classList.toggle('open'); };
   $('#userMenuBtn').onclick = (e) => { e.stopPropagation(); $('#tbSecondary').classList.remove('open'); $('#notifDropdown')?.classList.remove('open'); $('#userDropdown').classList.toggle('open'); };
