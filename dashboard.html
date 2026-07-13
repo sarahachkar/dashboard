@@ -4122,7 +4122,7 @@ function renderBtypeGrid() {
     }
     capped = true;
   }
-  const btn = (v, l) => `<button type="button" class="btype ${v === d.type ? 'active' : ''}" data-type="${v}"><span>${TYPE_ICONS[v] ? TYPE_ICONS[v] + ' ' : ''}${l}</span></button>`;
+  const btn = (v, l) => `<button type="button" class="btype ${v === d.type ? 'active' : ''}" data-type="${v}"><span>${l}</span></button>`;
   wrap.innerHTML =
     (list.length ? `<div class="btype-grid">${list.map(([v, l]) => btn(v, l)).join('')}</div>`
                  : `<div class="bhint">No chart type matches “${escapeHtml(btypeQuery)}”.</div>`) +
