@@ -610,6 +610,9 @@ select.input { cursor: pointer; }
 }
 .kpi .label { font-size: 12px; text-transform: none; letter-spacing: normal; color: var(--text-dim); font-weight: 500; }
 .kpi .value { font-size: 28px; font-weight: 800; line-height: 1.1; color: var(--text); background: linear-gradient(90deg, #c4b0ff, #80ffdb); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+/* The pastel gradient above is tuned for dark panels — on the light theme's
+   white cards it's nearly invisible, so swap in saturated brand shades. */
+[data-theme="light"] .kpi .value { background: linear-gradient(90deg, #5b3fd0, #008a70); -webkit-background-clip: text; background-clip: text; }
 .kpi .trend { font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 5px; }
 .trend.up { color: var(--accent-2); }
 .trend.down { color: var(--danger); }
