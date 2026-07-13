@@ -651,14 +651,35 @@ body[data-viewmode="link"] #homeBtn, body[data-viewmode="link"] #homePage { disp
 .hp-back { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .hp-back:hover { border-color: var(--accent); color: var(--accent); }
 .hp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
-.hp-card { text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; cursor: pointer; font-family: inherit; transition: transform .16s ease, box-shadow .16s ease, border-color .16s; animation: gridStagger .35s cubic-bezier(.16,1,.3,1) both; }
+.hp-card { position: relative; text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; cursor: pointer; font-family: inherit; transition: transform .16s ease, box-shadow .16s ease, border-color .16s; animation: gridStagger .35s cubic-bezier(.16,1,.3,1) both; }
 .hp-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 14px 34px rgba(16,24,40,0.14); }
-.hp-card .hc-icon { font-size: 28px; line-height: 1; margin-bottom: 12px; }
-.hp-card .hc-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hp-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hp-card .hc-title { font-size: 15px; font-weight: 700; color: var(--text); margin: 4px 0 4px; padding-right: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hp-card .hc-sub { font-size: 12px; color: var(--text-dim); }
 .hp-card.hc-new { border-style: dashed; display: grid; place-items: center; color: var(--accent); font-weight: 700; font-size: 14px; min-height: 118px; }
 .hp-empty { grid-column: 1 / -1; text-align: center; color: var(--text-dim); padding: 40px 0; font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { .hp-card { animation: none; } }
+/* Home card ⋮ quick-actions menu (Share / Delete) */
+.hc-menu-btn {
+  position: absolute; top: 10px; right: 8px; height: 24px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--panel); color: var(--text-dim); font-size: 11px; font-weight: 600; font-family: inherit; line-height: 24px; cursor: pointer;
+  opacity: 0; transform: scale(.9); transition: opacity .12s ease, transform .12s ease, background .12s ease, color .12s ease;
+}
+.hp-card:hover .hc-menu-btn, .hp-card:focus-within .hc-menu-btn, .hc-menu-btn:focus { opacity: 1; transform: scale(1); }
+.hc-menu-btn:hover { background: var(--panel-2, rgba(124,92,252,.12)); color: var(--text); }
+.hc-menu {
+  position: absolute; top: 40px; right: 8px; min-width: 150px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 12px 28px rgba(16,24,40,0.18); padding: 6px; display: none; flex-direction: column;
+  gap: 2px; z-index: 5; opacity: 0; transform: translateY(-4px) scale(.98); transition: opacity .12s ease, transform .12s ease;
+}
+.hc-menu.open { display: flex; opacity: 1; transform: translateY(0) scale(1); }
+.hc-menu button {
+  all: unset; box-sizing: border-box; width: 100%; padding: 8px 10px; border-radius: 7px; font-size: 13px;
+  font-family: inherit; color: var(--text); cursor: pointer; transition: background .12s ease;
+}
+.hc-menu button:hover { background: var(--panel-2, rgba(124,92,252,.1)); }
+.hc-menu button.danger { color: var(--danger, #ff5e7a); }
+@media (prefers-reduced-motion: reduce) { .hc-menu-btn, .hc-menu { transition: none; } }
 
 /* ===== KPI summary strip (auto-computed from the loaded dataset) ===== */
 #summaryStrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 0 0 14px; }
@@ -1231,7 +1252,10 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 <div class="modal-overlay" id="shareOverlay">
   <div class="builder" role="dialog" aria-modal="true" style="width:min(560px,96vw)">
     <div class="builder-head">
-      <h2>Share dashboard</h2>
+      <div>
+        <h2 style="margin:0">Share dashboard</h2>
+        <div id="shareSubtitle" class="bhint" style="margin:2px 0 0"></div>
+      </div>
       <button class="icon-btn" id="shareClose" title="Close">Close</button>
     </div>
 
@@ -1914,6 +1938,23 @@ async function deleteDashboard() {
   } catch (e) { toast('Delete failed: ' + e.message, true); }
 }
 
+// Delete a dashboard directly from a Home page card, without first opening
+// it into the workspace. Refreshes the home grid in place afterwards.
+async function quickDeleteDashboard(id, title) {
+  const d = dashboardsList.find(x => x.id === id);
+  if (d && d.mine === false && !isAdmin()) return toast('You can only delete your own dashboards', true);
+  if (!confirm(`Delete dashboard "${title}"? This cannot be undone.`)) return;
+  try {
+    await API.deleteDashboard(id);
+    const { dashboards } = await API.listDashboards();
+    dashboardsList = dashboards || [];
+    if (state.id === id) { if (dashboardsList.length) await openDashboard(dashboardsList[0].id); else await createDashboard(); }
+    if (homeView.level === 'list') homeView.dashboards = homeView.dashboards.filter(x => x.id !== id);
+    renderHomePage();
+    toast('Dashboard deleted');
+  } catch (e) { toast('Delete failed: ' + e.message, true); }
+}
+
 // Update the menu button label to the current dashboard's title.
 function renderDashboardPicker() {
   const label = $('#dashMenuLabel'); if (!label) return;
@@ -1984,7 +2025,6 @@ async function renderDashMenu() {
    with me". Clicking a dashboard opens it and hides the home page.
    ===================================================================== */
 let homeView = { level: 'root' };
-let hpUsersCache = [];
 async function showHomePage() {
   homeView = { level: 'root' };
   $('#homePage').style.display = '';
@@ -1996,51 +2036,51 @@ async function showHomePage() {
   renderHomePage();
 }
 function hideHomePage() { const hp = $('#homePage'); if (hp) hp.style.display = 'none'; }
+// Close any open card ⋮ menu when clicking elsewhere on the page.
+document.addEventListener('click', e => {
+  if (e.target.closest('.hc-menu-btn') || e.target.closest('.hc-menu')) return;
+  document.querySelectorAll('.hc-menu.open').forEach(m => m.classList.remove('open'));
+});
 async function renderHomePage() {
   const grid = $('#hpGrid'), title = $('#hpTitle'), back = $('#hpBack');
   const esc = escapeHtml;
   const openDash = id => { hideHomePage(); openDashboard(id); };
-  const dashCard = (d, i, showOwner) => `
-    <button class="hp-card" data-open="${d.id}" style="animation-delay:${Math.min(i * 45, 400)}ms">
-      <div class="hc-icon">📊</div>
+  const dashCard = (d, i, showOwner) => {
+    const canShare = isAdmin();                    // sharing/permissions is admin-only, matches the backend
+    const canDelete = d.mine || isAdmin();
+    const menu = (canShare || canDelete) ? `
+      <button class="hc-menu-btn" data-menu="${d.id}" title="More options" aria-label="More options" onclick="event.stopPropagation()">More</button>
+      <div class="hc-menu" data-menufor="${d.id}">
+        ${canShare ? `<button data-action="share" data-id="${d.id}" data-title="${esc(d.title)}" data-token="${d.share_token || ''}">Share…</button>` : ''}
+        ${canDelete ? `<button data-action="delete" data-id="${d.id}" data-title="${esc(d.title)}" class="danger">Delete</button>` : ''}
+      </div>` : '';
+    return `
+    <div class="hp-card" data-open="${d.id}" tabindex="0" role="button" style="animation-delay:${Math.min(i * 45, 400)}ms">
+      ${menu}
       <div class="hc-title" title="${esc(d.title)}">${esc(d.title)}</div>
       <div class="hc-sub">${showOwner ? esc(d.owner_name || d.owner_email || '') + ' · ' : ''}${d.updated_at ? new Date(d.updated_at).toLocaleDateString() : ''}</div>
-    </button>`;
+    </div>`;
+  };
 
   if (homeView.level === 'root') {
+    // Always exactly two entry points, for every account: your own
+    // workspace, and whatever has been shared with you. Admins get
+    // implicit access to every dashboard (enforced server-side), so
+    // "Shared with me" naturally lists everyone else's dashboards for
+    // them — per-user browsing/sharing lives in the Admin panel instead.
     title.textContent = currentUser ? `Welcome, ${currentUser.name || currentUser.email}` : 'Home';
     back.style.display = 'none';
     const mine = dashboardsList.filter(d => d.mine);
-    let html = `
-      <button class="hp-card" data-folder="mine" style="animation-delay:0ms">
-        <div class="hc-icon">🗂️</div>
-        <div class="hc-title">My dashboards</div>
+    const shared = dashboardsList.filter(d => !d.mine);
+    const html = `
+      <div class="hp-card" data-folder="mine" tabindex="0" role="button" style="animation-delay:0ms">
+        <div class="hc-title">My workspace</div>
         <div class="hc-sub">${mine.length} dashboard${mine.length === 1 ? '' : 's'}</div>
-      </button>`;
-    if (isAdmin()) {
-      grid.innerHTML = html + '<div class="hp-empty">Loading users…</div>';
-      try { const { users } = await API.adminUsers(); hpUsersCache = users || []; }
-      catch (e) { hpUsersCache = []; }
-      const others = hpUsersCache.filter(u => !currentUser || u.id !== currentUser.id);
-      html += others.map((u, i) => {
-        const n = dashboardsList.filter(d => d.owner_id === u.id).length;   // admin list = ALL dashboards
-        return `
-        <button class="hp-card" data-userfolder="${u.id}" style="animation-delay:${Math.min((i + 1) * 45, 400)}ms">
-          <div class="hc-icon">👤</div>
-          <div class="hc-title" title="${esc(u.name || u.email)}">${esc(u.name || u.email)}</div>
-          <div class="hc-sub">${n} dashboard${n === 1 ? '' : 's'}</div>
-        </button>`;
-      }).join('');
-      if (!others.length) html += '<div class="hp-empty">No other users yet.</div>';
-    } else {
-      const shared = dashboardsList.filter(d => !d.mine);
-      html += `
-      <button class="hp-card" data-folder="shared" style="animation-delay:45ms">
-        <div class="hc-icon">🤝</div>
+      </div>
+      <div class="hp-card" data-folder="shared" tabindex="0" role="button" style="animation-delay:45ms">
         <div class="hc-title">Shared with me</div>
         <div class="hc-sub">${shared.length} dashboard${shared.length === 1 ? '' : 's'}</div>
-      </button>`;
-    }
+      </div>`;
     grid.innerHTML = html;
   } else if (homeView.level === 'list') {
     title.textContent = homeView.title;
@@ -2048,32 +2088,53 @@ async function renderHomePage() {
     const ds = homeView.dashboards || [];
     let html = ds.map((d, i) => dashCard(d, i, homeView.showOwner)).join('');
     if (homeView.canCreate && isEditorAcct())
-      html += `<button class="hp-card hc-new" data-newdash="1" style="animation-delay:${Math.min(ds.length * 45, 400)}ms">＋ New dashboard</button>`;
+      html += `<button class="hp-card hc-new" data-newdash="1" style="animation-delay:${Math.min(ds.length * 45, 400)}ms">+ New dashboard</button>`;
     if (!ds.length && !homeView.canCreate) html += '<div class="hp-empty">No dashboards here yet.</div>';
     grid.innerHTML = html;
   }
 
-  grid.querySelectorAll('[data-open]').forEach(b => b.onclick = () => openDash(b.dataset.open));
-  grid.querySelectorAll('[data-folder]').forEach(b => b.onclick = () => {
-    const kind = b.dataset.folder;
-    const mine = kind === 'mine';
-    homeView = {
-      level: 'list',
-      title: mine ? 'My dashboards' : 'Shared with me',
-      dashboards: dashboardsList.filter(d => mine ? d.mine : !d.mine),
-      canCreate: mine, showOwner: !mine
-    };
-    renderHomePage();
+  grid.querySelectorAll('.hp-card[data-open]').forEach(card => {
+    const go = () => openDash(card.dataset.open);
+    card.onclick = go;
+    card.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
   });
-  grid.querySelectorAll('[data-userfolder]').forEach(b => b.onclick = () => {
-    const u = hpUsersCache.find(x => x.id === +b.dataset.userfolder);
-    homeView = {
-      level: 'list',
-      title: (u && (u.name || u.email)) || 'User',
-      dashboards: dashboardsList.filter(d => d.owner_id === +b.dataset.userfolder),
-      canCreate: false, showOwner: false
+  // "More" quick-actions menu on each dashboard card — Share (admin) /
+  // Delete (owner or admin) — without navigating into the dashboard first.
+  grid.querySelectorAll('.hc-menu-btn').forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      const id = btn.dataset.menu;
+      grid.querySelectorAll('.hc-menu.open').forEach(m => { if (m.dataset.menufor !== id) m.classList.remove('open'); });
+      grid.querySelector(`.hc-menu[data-menufor="${id}"]`)?.classList.toggle('open');
     };
-    renderHomePage();
+  });
+  grid.querySelectorAll('.hc-menu [data-action="share"]').forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      grid.querySelectorAll('.hc-menu.open').forEach(m => m.classList.remove('open'));
+      openShare({ id: btn.dataset.id, title: btn.dataset.title, share_token: btn.dataset.token || null });
+    };
+  });
+  grid.querySelectorAll('.hc-menu [data-action="delete"]').forEach(btn => {
+    btn.onclick = e => {
+      e.stopPropagation();
+      grid.querySelectorAll('.hc-menu.open').forEach(m => m.classList.remove('open'));
+      quickDeleteDashboard(btn.dataset.id, btn.dataset.title);
+    };
+  });
+  grid.querySelectorAll('.hp-card[data-folder]').forEach(card => {
+    const go = () => {
+      const mine = card.dataset.folder === 'mine';
+      homeView = {
+        level: 'list',
+        title: mine ? 'My workspace' : 'Shared with me',
+        dashboards: dashboardsList.filter(d => mine ? d.mine : !d.mine),
+        canCreate: mine, showOwner: !mine
+      };
+      renderHomePage();
+    };
+    card.onclick = go;
+    card.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
   });
   const nd = grid.querySelector('[data-newdash]');
   if (nd) nd.onclick = async () => { hideHomePage(); await createDashboard(); };
@@ -4702,17 +4763,30 @@ function activeBuilderConn() { const sel = $('#bdConnSelect'); return sel ? sel.
    Share — public read-only link + per-user read-only grants
    ===================================================================== */
 function shareUrl(token) { return location.origin + '/view/' + token; }
-function openShare() {
-  if (!canEditCurrent || !state.id) return toast('You can only share dashboards you own', true);
+// shareCtx holds whichever dashboard the Share modal currently targets.
+// When opened via the in-workspace Share button it mirrors `state`; when
+// opened from a Home page card it's populated straight from the card's
+// dashboard-list entry, so the modal never has to navigate into the
+// dashboard first.
+let shareCtx = null;
+function openShare(ctx) {
+  if (ctx) {
+    if (!isAdmin()) return toast('Only admins can manage sharing', true);
+    shareCtx = { id: ctx.id, title: ctx.title, share_token: ctx.share_token || null };
+  } else {
+    if (!canEditCurrent || !state.id) return toast('You can only share dashboards you own', true);
+    shareCtx = { id: state.id, title: state.title, share_token: state.share_token };
+  }
+  const sub = $('#shareSubtitle'); if (sub) sub.textContent = shareCtx.title || '';
   $('#shareOverlay').classList.add('open');
   renderShareLink();
   renderShareUsers();
 }
 async function renderShareUsers() {
-  const wrap = $('#shareUsers'); if (!wrap) return;
+  const wrap = $('#shareUsers'); if (!wrap || !shareCtx) return;
   wrap.innerHTML = '<div class="bhint">Loading…</div>';
   try {
-    const { users } = await API.dashboardPermissions(state.id);
+    const { users } = await API.dashboardPermissions(shareCtx.id);
     if (!users.length) { wrap.innerHTML = '<div class="bhint">No other users to share with yet.</div>'; return; }
     wrap.innerHTML = users.map(u => `
       <div class="admin-row">
@@ -4725,17 +4799,21 @@ async function renderShareUsers() {
       </div>`).join('');
     wrap.querySelectorAll('select[data-uid]').forEach(sel => {
       sel.onchange = async () => {
-        try { await API.setDashboardPermission(state.id, +sel.dataset.uid, sel.value); sel.className = 'perm-select p-' + sel.value; toast('Access updated'); }
-        catch (e) { toast('Failed: ' + e.message, true); }
+        try {
+          await API.setDashboardPermission(shareCtx.id, +sel.dataset.uid, sel.value);
+          sel.className = 'perm-select p-' + sel.value;
+          toast(sel.value === 'none' ? 'Access hidden' : 'Access updated');
+        } catch (e) { toast('Failed: ' + e.message, true); }
       };
     });
   } catch (e) { wrap.innerHTML = '<div class="bhint">Failed to load: ' + escapeHtml(e.message) + '</div>'; }
 }
-function closeShare() { $('#shareOverlay').classList.remove('open'); }
+function closeShare() { $('#shareOverlay').classList.remove('open'); shareCtx = null; }
 function renderShareLink() {
   const input = $('#shareLinkInput');
-  if (state.share_token) {
-    input.value = shareUrl(state.share_token);
+  if (!shareCtx) return;
+  if (shareCtx.share_token) {
+    input.value = shareUrl(shareCtx.share_token);
     $('#shareRevokeBtn').style.display = '';
     $('#shareCreateBtn').textContent = 'Regenerate';
   } else {
@@ -4743,6 +4821,13 @@ function renderShareLink() {
     $('#shareRevokeBtn').style.display = 'none';
     $('#shareCreateBtn').textContent = 'Create link';
   }
+}
+// Keep state / dashboardsList in sync if the dashboard being shared is also
+// the one currently open in the workspace, or is cached in the picker list.
+function syncShareTokenEverywhere(id, token) {
+  if (state.id === id) state.share_token = token;
+  const d = dashboardsList.find(x => x.id === id);
+  if (d) d.share_token = token;
 }
 
 /* =====================================================================
@@ -4981,16 +5066,26 @@ function init() {
   $('#userPermSave').onclick = saveUserPerms;
   $('#userPermOverlay').addEventListener('click', e=>{ if (e.target.id==='userPermOverlay') closeUserPerms(); });
   // Share modal
-  $('#shareBtn').onclick = openShare;
+  $('#shareBtn').onclick = () => openShare();
   $('#shareClose').onclick = closeShare;
   $('#shareOverlay').addEventListener('click', e=>{ if (e.target.id==='shareOverlay') closeShare(); });
   $('#shareCreateBtn').onclick = async () => {
-    try { const { share_token } = await API.shareDashboard(state.id); state.share_token = share_token; renderShareLink(); toast('Share link ready'); }
-    catch(e){ toast('Failed: '+e.message, true); }
+    if (!shareCtx) return;
+    try {
+      const { share_token } = await API.shareDashboard(shareCtx.id);
+      shareCtx.share_token = share_token;
+      syncShareTokenEverywhere(shareCtx.id, share_token);
+      renderShareLink(); toast('Share link ready');
+    } catch(e){ toast('Failed: '+e.message, true); }
   };
   $('#shareRevokeBtn').onclick = async () => {
-    try { await API.unshareDashboard(state.id); state.share_token = null; renderShareLink(); toast('Link revoked'); }
-    catch(e){ toast('Failed: '+e.message, true); }
+    if (!shareCtx) return;
+    try {
+      await API.unshareDashboard(shareCtx.id);
+      shareCtx.share_token = null;
+      syncShareTokenEverywhere(shareCtx.id, null);
+      renderShareLink(); toast('Link revoked');
+    } catch(e){ toast('Failed: '+e.message, true); }
   };
   $('#shareCopyBtn').onclick = () => {
     const v = $('#shareLinkInput').value; if (!v) return;
