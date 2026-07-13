@@ -238,7 +238,6 @@ button { font-family: inherit; cursor: pointer; }
 .graph-card { position: relative; display: flex; gap: 11px; align-items: center; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; transition: border-color .15s, transform .15s, box-shadow .15s; animation: gcIn .22s cubic-bezier(.16,1,.3,1) both; }
 .graph-card:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(124,92,252,0.12); transform: translateY(-1px); }
 @keyframes gcIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-.gc-thumb { width: 46px; height: 46px; flex: none; border-radius: 10px; display: grid; place-items: center; font-size: 22px; background: linear-gradient(160deg, rgba(124,92,252,0.18), rgba(0,229,176,0.12)); border: 1px solid var(--border); }
 .gc-body { flex: 1; min-width: 0; }
 .gc-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gc-dash { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -305,6 +304,37 @@ body[data-viewmode="link"] .tb-secondary,
 body[data-viewmode="link"] .tb-overflow-btn,
 body[data-viewmode="link"] .user-menu { display: none !important; }
 body[data-viewmode="link"] .dash-title { pointer-events: none; }
+
+/* ===== Kiosk / presentation mode: fullscreen dashboard, zero chrome ===== */
+body[data-kiosk="1"] { padding-top: 12px; }
+body[data-kiosk="1"] .toolbar,
+body[data-kiosk="1"] .view-tabs,
+body[data-kiosk="1"] .filterbar,
+body[data-kiosk="1"] .w-controls,
+body[data-kiosk="1"] .w-foot,
+body[data-kiosk="1"] .drag-dots,
+body[data-kiosk="1"] .resize-handle,
+body[data-kiosk="1"] .add-card-fab { display: none !important; }
+body[data-kiosk="1"] .kiosk-title { display: flex; }
+.kiosk-title { display: none; align-items: baseline; gap: 12px; margin: 4px 4px 14px; }
+.kiosk-title .kt-name { font-size: 22px; font-weight: 800; color: var(--text); }
+.kiosk-title .kt-view { font-size: 14px; color: var(--text-dim); font-weight: 600; }
+
+/* ===== Command palette (Ctrl/Cmd+K) ===== */
+.cmdk-overlay { position: fixed; inset: 0; background: rgba(10,13,26,0.55); backdrop-filter: blur(3px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 14vh; }
+.cmdk-overlay.open { display: flex; }
+.cmdk { width: min(560px, 94vw); background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 64px rgba(0,0,0,0.35); overflow: hidden; animation: cmdkIn .14s ease-out; }
+@keyframes cmdkIn { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: none; } }
+.cmdk input { width: 100%; box-sizing: border-box; background: transparent; border: none; outline: none; color: var(--text); font: 600 15px Inter, sans-serif; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.cmdk input::placeholder { color: var(--text-dim); font-weight: 500; }
+.cmdk-list { max-height: 46vh; overflow-y: auto; padding: 6px; }
+.cmdk-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; border: none; color: var(--text); font: 500 13.5px Inter, sans-serif; padding: 10px 12px; border-radius: 8px; cursor: pointer; }
+.cmdk-item .ck-kind { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; flex: none; }
+.cmdk-item .ck-hint { margin-left: auto; font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.cmdk-item.active, .cmdk-item:hover { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.cmdk-empty { padding: 22px; text-align: center; color: var(--text-dim); font-size: 13px; }
+.cmdk-foot { display: flex; gap: 16px; justify-content: flex-end; padding: 8px 14px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 11px; }
+.widget.cmdk-flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .25s; }
 
 /* ===== Tabs (dashboard views) ===== */
 .view-tabs { display: flex; align-items: center; gap: 6px; padding: 8px 20px 0; background: var(--panel); border-bottom: 1px solid rgba(124,92,252,0.25); position: fixed; top: var(--toolbarH, 56px); left: 0; right: 0; z-index: 45; }
@@ -559,8 +589,10 @@ select.input { cursor: pointer; }
 .box-holder { position: relative; }
 .sankey-holder { position: relative; }
 .bullet-holder, .slope-holder, .bump-holder, .radial-holder, .combo-holder { position: relative; }
-#mapFilterBar { margin: 0 0 12px; }
+#mapFilterBar { margin: 0 0 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
+#mapFilterBar .mf-clearall { background: none; border: none; color: var(--accent); font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; padding: 6px 4px; }
+#mapFilterBar .mf-clearall:hover { text-decoration: underline; }
 .mapfilter-chip .mf-x { cursor: pointer; width: 20px; height: 20px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent); color: #fff; font-size: 13px; line-height: 1; border: none; }
 .mapfilter-chip .mf-x:hover { filter: brightness(1.12); }
 .mapfilter-chip .mf-lbl { opacity: .75; font-weight: 500; }
@@ -993,6 +1025,15 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       <span class="badge" id="rowBadge">0 rows</span>
       <span class="badge" id="backendBadge" title="Backend connection status">local</span>
       <button class="btn ghost sm" id="refreshBtn" title="Refresh all charts"><span class="btn-icon">↺</span><span class="btn-label">Refresh</span></button>
+      <select class="dash-picker" id="autoRefreshSel" title="Auto-refresh interval" style="max-width:110px">
+        <option value="0">Auto: off</option>
+        <option value="10">Auto: 10s</option>
+        <option value="30">Auto: 30s</option>
+        <option value="60">Auto: 1m</option>
+        <option value="300">Auto: 5m</option>
+      </select>
+      <span class="badge" id="lastUpdated" title="Last refreshed" style="display:none"></span>
+      <button class="btn ghost sm" id="kioskBtn" title="Presentation / TV mode (fullscreen, auto-cycles views)"><span class="btn-icon">▶</span><span class="btn-label">Present</span></button>
       <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
     </div>
     <button class="btn ghost sm icon-only tb-overflow-btn" id="overflowBtn" title="More" aria-haspopup="true">⋯</button>
@@ -1089,6 +1130,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       </div>
     </div>
 
+    <div class="kiosk-title"><span class="kt-name" id="ktName"></span><span class="kt-view" id="ktView"></span></div>
     <div id="summaryStrip" style="display:none"></div>
     <div id="mapFilterBar" style="display:none"></div>
     <div class="grid" id="grid"></div>
@@ -1310,6 +1352,15 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   </div>
 </div>
 
+<!-- ===== Command palette (Ctrl/Cmd+K) ===== -->
+<div class="cmdk-overlay" id="cmdkOverlay">
+  <div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input id="cmdkInput" placeholder="Search dashboards, views, graphs, actions…" autocomplete="off" spellcheck="false">
+    <div class="cmdk-list" id="cmdkList"></div>
+    <div class="cmdk-foot"><span>↑↓ navigate</span><span>↵ select</span><span>esc close</span></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1408,7 +1459,6 @@ const CHART_TYPES = [
   ['combo','Combo (Bar + Line)'],['pareto','Pareto'],['radialbar','Radial Bars'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
-const TYPE_ICONS = { line:'📈', spline:'〰️', step:'📶', sparkline:'📉', bar:'📊', column:'📊', hbar:'📶', stacked:'🧱', hstacked:'🧱', stacked100:'💯', area:'🏔️', stackedArea:'🏔️', pie:'🥧', donut:'🍩', scatter:'✴️', bubble:'🫧', lollipop:'🍭', heatmap:'🌡️', treemap:'🗂️', gauge:'🎯', radar:'🕸️', polarArea:'🎡', funnel:'🔻', pyramid:'🔺', progress:'📊', worldmap:'🌍', calendar:'📅', waterfall:'💧', gantt:'📊', boxplot:'📦', sankey:'🔀', bullet:'🎯', slope:'📈', bump:'🏆', combo:'📊', pareto:'📉', radialbar:'🛞', kpi:'🔢', table:'▦', histogram:'📐' };
 
 const PALETTES = {
   blue:   ['#4f8ef7','#6ba4f9','#3b6fd4','#86b6fb','#2a55a8','#a9cdfd'],
@@ -1646,18 +1696,56 @@ function widgetCountryColumn(w, ds) {
   if (w.type === 'worldmap') return w.country || w.x;  // maps use their own country col
   return detectCountryColumn(ds);                      // auto-detect
 }
-// Update the "Filtered by <country>" chip above the grid.
+/* =====================================================================
+   Cross-filtering (Qlik-style) — click a bar / slice / category on any
+   chart to filter every other widget by that value. Multiple values in
+   the SAME column are OR-ed, filters across DIFFERENT columns are AND-ed.
+   The widget you clicked keeps showing all its values (the selected ones
+   are highlighted) so you can keep adding/removing values from it.
+   ===================================================================== */
+let crossFilters = [];   // [{col, val, src}] — src = widget id the click came from
+
+function toggleCrossFilter(col, val, srcWidgetId) {
+  val = String(val);
+  const i = crossFilters.findIndex(f => f.col === col && f.val === val);
+  if (i >= 0) crossFilters.splice(i, 1);
+  else crossFilters.push({ col, val, src: srcWidgetId });
+  renderGrid();
+}
+function removeCrossFilter(idx) { crossFilters.splice(idx, 1); renderGrid(); }
+function clearCrossFilters() { crossFilters = []; renderGrid(); }
+// Values currently selected on a column (used for source-chart highlighting).
+function crossFilterValues(col) {
+  return new Set(crossFilters.filter(f => f.col === col).map(f => f.val));
+}
+
+// Update the filter-chips bar above the grid (country + cross filters).
 function renderMapFilterChip() {
   const bar = $('#mapFilterBar'); if (!bar) return;
-  if (!mapSelection) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  if (!mapSelection && !crossFilters.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   bar.style.display = '';
-  bar.innerHTML = `<span class="mapfilter-chip"><span class="mf-lbl">🌍 Filtered by country:</span> ${escapeHtml(mapSelection)}
+  let html = '';
+  if (mapSelection) html += `<span class="mapfilter-chip"><span class="mf-lbl">🌍 Country:</span> ${escapeHtml(mapSelection)}
     <button class="mf-x" title="Clear country filter" onclick="clearMapSelection()">✕</button></span>`;
+  html += crossFilters.map((f, i) => `<span class="mapfilter-chip"><span class="mf-lbl">${escapeHtml(f.col)}:</span> ${escapeHtml(f.val)}
+    <button class="mf-x" title="Remove this filter" onclick="removeCrossFilter(${i})">✕</button></span>`).join('');
+  const n = crossFilters.length + (mapSelection ? 1 : 0);
+  if (n > 1) html += `<button class="mf-clearall" onclick="clearAllChartFilters()">Clear all</button>`;
+  bar.innerHTML = html;
 }
 function clearMapSelection() { mapSelection = null; renderGrid(); }
+function clearAllChartFilters() { mapSelection = null; crossFilters = []; renderGrid(); }
 
-function filteredRows() {
+function filteredRows(w) {
   let rows = dataset.rows;
+  // Cross filters: skip ones this widget created (it keeps showing all its
+  // values, highlighted) and ones whose column this dataset doesn't have.
+  const active = crossFilters.filter(f => (!w || f.src !== w.id) && dataset.columns.includes(f.col));
+  if (active.length) {
+    const byCol = {};
+    active.forEach(f => (byCol[f.col] = byCol[f.col] || new Set()).add(f.val));
+    rows = rows.filter(r => Object.keys(byCol).every(c => byCol[c].has(String(r[c]))));
+  }
   const dc = $('#dateCol').value;
   const tr = $('#timeRange').value;
   if (dc && tr !== 'all' && dataset.columns.includes(dc)) {
@@ -1823,12 +1911,14 @@ let dashboardsList = [];      // [{id,title,updated_at}]
 let saveTimer;
 
 function serializeState() {
-  return { views: state.views.map(v => ({ name: v.name, widgets: v.widgets })), activeView, theme: state.theme };
+  return { views: state.views.map(v => ({ name: v.name, widgets: v.widgets })), activeView, theme: state.theme, refreshSec: state.refreshSec || 0 };
 }
 function applyState(s) {
   s = s || {};
   state.views = (s.views && s.views.length) ? s.views : [{ name: 'Overview', widgets: defaultWidgets() }];
   activeView = Math.min(s.activeView || 0, state.views.length - 1);
+  state.refreshSec = +s.refreshSec || 0;
+  scheduleAutoRefresh();
   // NOTE: do NOT apply a dashboard's saved theme to the whole app — the color
   // scheme is a personal per-account preference (see applyTheme / localStorage),
   // so opening someone else's dashboard never flips your UI.
@@ -1839,6 +1929,129 @@ function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', t);
   try { localStorage.setItem('nexus_theme', t); } catch (e) {}
 }
+
+/* =====================================================================
+   Auto-refresh (Grafana-style) — re-renders every chart on an interval.
+   The interval is saved on the dashboard, so a wall-mounted screen that
+   opens it gets the same cadence. "Last refreshed" stamp in the toolbar.
+   ===================================================================== */
+let autoRefreshTimer = null;
+function stampUpdated() {
+  const el = $('#lastUpdated'); if (!el) return;
+  el.style.display = '';
+  el.textContent = '⟳ ' + new Date().toLocaleTimeString();
+}
+function scheduleAutoRefresh() {
+  clearInterval(autoRefreshTimer); autoRefreshTimer = null;
+  const sec = +(state.refreshSec || 0);
+  const sel = $('#autoRefreshSel'); if (sel) sel.value = String([10,30,60,300].includes(sec) ? sec : 0);
+  if (sec > 0) autoRefreshTimer = setInterval(() => { renderGrid(); stampUpdated(); }, sec * 1000);
+}
+
+/* =====================================================================
+   Kiosk / presentation mode (Grafana TV-mode) — fullscreen, all chrome
+   hidden, and when the dashboard has several views it cycles through
+   them automatically. Esc (or leaving fullscreen) exits.
+   ===================================================================== */
+let kioskCycleTimer = null;
+const KIOSK_CYCLE_SEC = 15;
+function enterKiosk() {
+  document.body.dataset.kiosk = '1';
+  try { document.documentElement.requestFullscreen?.(); } catch (e) {}
+  if (state.views.length > 1) {
+    kioskCycleTimer = setInterval(() => {
+      activeView = (activeView + 1) % state.views.length;
+      renderAll();
+    }, KIOSK_CYCLE_SEC * 1000);
+  }
+  syncStickyOffsets();
+  toast('Presentation mode — press Esc to exit');
+}
+function exitKiosk() {
+  if (document.body.dataset.kiosk !== '1') return;
+  delete document.body.dataset.kiosk;
+  clearInterval(kioskCycleTimer); kioskCycleTimer = null;
+  if (document.fullscreenElement) { try { document.exitFullscreen?.(); } catch (e) {} }
+  syncStickyOffsets();
+}
+
+/* =====================================================================
+   Command palette (Ctrl/Cmd+K) — fuzzy-jump to any dashboard, view or
+   graph, or run a common action, without touching the mouse.
+   ===================================================================== */
+let cmdkResults = [], cmdkIndex = 0;
+function cmdkSources() {
+  const items = [];
+  const act = (label, hint, run) => items.push({ kind: 'Action', label, hint, run });
+  if (isEditorAcct() && canEditCurrent) act('New graph', 'open the graph builder', () => openBuilder());
+  act('Go home', 'dashboard folders', () => showHomePage());
+  act('Toggle theme', 'light / dark', () => $('#themeBtn')?.click());
+  act('Presentation mode', 'fullscreen, auto-cycles views', () => enterKiosk());
+  act('Refresh charts', '', () => { renderGrid(); stampUpdated(); });
+  if (isAdmin() && state.id) act('Share this dashboard', state.title || '', () => openShare());
+  if (isEditorAcct()) act('New dashboard', '', () => { hideHomePage(); createDashboard(); });
+  (dashboardsList || []).forEach(d => items.push({
+    kind: 'Dashboard', label: d.title || 'Untitled', hint: d.mine ? 'mine' : (d.owner_name || d.owner_email || ''),
+    run: () => { hideHomePage(); openDashboard(d.id); }
+  }));
+  (state.views || []).forEach((v, i) => items.push({
+    kind: 'View', label: v.name || `View ${i + 1}`, hint: state.title || '',
+    run: () => { hideHomePage(); activeView = i; renderAll(); }
+  }));
+  (state.views || []).forEach((v, vi) => (v.widgets || []).forEach(w => items.push({
+    kind: 'Graph', label: w.title || 'Untitled', hint: v.name || '',
+    run: () => {
+      hideHomePage(); activeView = vi; renderAll();
+      setTimeout(() => {
+        const el = document.querySelector(`.widget[data-id="${w.id}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('cmdk-flash');
+          setTimeout(() => el.classList.remove('cmdk-flash'), 1500);
+        }
+      }, 120);
+    }
+  })));
+  return items;
+}
+function renderCmdkList(q) {
+  q = (q || '').trim().toLowerCase();
+  const scored = cmdkSources().map(it => {
+    const l = it.label.toLowerCase();
+    const s = !q ? 1 : l.startsWith(q) ? 3 : l.includes(q) ? 2 : (it.hint || '').toLowerCase().includes(q) ? 1 : 0;
+    return { it, s };
+  }).filter(x => x.s > 0);
+  scored.sort((a, b) => b.s - a.s);
+  cmdkResults = scored.slice(0, 30).map(x => x.it);
+  cmdkIndex = 0;
+  const list = $('#cmdkList');
+  if (!cmdkResults.length) { list.innerHTML = '<div class="cmdk-empty">No matches.</div>'; return; }
+  list.innerHTML = cmdkResults.map((it, i) => `
+    <button class="cmdk-item ${i === 0 ? 'active' : ''}" data-i="${i}">
+      <span class="ck-kind">${it.kind}</span>${escapeHtml(it.label)}
+      ${it.hint ? `<span class="ck-hint">${escapeHtml(it.hint)}</span>` : ''}
+    </button>`).join('');
+  list.querySelectorAll('.cmdk-item').forEach(b => b.onclick = () => runCmdk(+b.dataset.i));
+}
+function cmdkMove(delta) {
+  if (!cmdkResults.length) return;
+  cmdkIndex = (cmdkIndex + delta + cmdkResults.length) % cmdkResults.length;
+  $$('#cmdkList .cmdk-item').forEach((b, i) => b.classList.toggle('active', i === cmdkIndex));
+  $(`#cmdkList .cmdk-item[data-i="${cmdkIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+function runCmdk(i) {
+  const it = cmdkResults[i]; if (!it) return;
+  closeCmdk();
+  it.run();
+}
+function openCmdk() {
+  const ov = $('#cmdkOverlay'); if (!ov) return;
+  ov.classList.add('open');
+  const inp = $('#cmdkInput'); inp.value = '';
+  renderCmdkList('');
+  inp.focus();
+}
+function closeCmdk() { $('#cmdkOverlay')?.classList.remove('open'); }
 function setSaveIndicator(status) {   // 'saved' | 'unsaved' | 'saving'
   const el = $('#saveIndicator'); if (!el) return;
   el.className = 'save-indicator ' + status;
@@ -2196,6 +2409,9 @@ function showGridSkeleton(n = 3) {
 
 function renderGrid() {
   const grid = $('#grid');
+  // Kiosk header (only visible in presentation mode)
+  const ktn = $('#ktName'), ktv = $('#ktView');
+  if (ktn) { ktn.textContent = state.title || ''; ktv.textContent = state.views.length > 1 ? (currentView().name || '') : ''; }
   Object.values(charts).forEach(c=>{ try{c.destroy();}catch(e){} });
   charts = {};
   grid.innerHTML = '';
@@ -2464,7 +2680,7 @@ function renderWidgetBody(w) {
   const prevDs = dataset;
   if (w.savedDataset && w.savedDataset.rows.length) dataset = w.savedDataset;
 
-  let rows = filteredRows();
+  let rows = filteredRows(w);
   // Cross-filter: when a country is selected on a world map, narrow every OTHER
   // widget to that country's rows (the map itself keeps showing all countries).
   if (mapSelection && w.type !== 'worldmap') {
@@ -2505,6 +2721,8 @@ function renderWidgetBody(w) {
     holder.appendChild(canvas);
     body.appendChild(holder);
     const cfg = buildChartConfig(w, rows);
+    applySelectionHighlight(cfg, w);
+    attachCrossFilterClick(cfg, w);
     charts[w.id] = new Chart(canvas.getContext('2d'), cfg);
   } catch (err) {
     body.innerHTML = `<div class="w-error"><div class="big">⚠</div>${escapeHtml(err.message)}<br>
@@ -2516,6 +2734,48 @@ function renderWidgetBody(w) {
 function pal(theme){ return PALETTES[theme] || PALETTES.mixed; }
 function gridColor(){ return getComputedStyle(document.body).getPropertyValue('--border').trim(); }
 function textColor(){ return getComputedStyle(document.body).getPropertyValue('--text-dim').trim(); }
+
+/* ---- Cross-filter wiring for label-based Chart.js charts ---- */
+// Chart types (of the ones built by buildChartConfig) where clicking a
+// labelled element is a meaningful "filter by this X value".
+const CROSSFILTER_TYPES = new Set(['bar','column','hbar','stacked','hstacked','stacked100',
+  'line','spline','step','sparkline','area','stackedArea','lollipop',
+  'pie','donut','polarArea','radar','funnel','pyramid','progress']);
+// Subset whose filled elements we can visually dim to highlight the selection.
+const HIGHLIGHT_TYPES = new Set(['bar','column','hbar','stacked','hstacked','stacked100',
+  'lollipop','pie','donut','polarArea','funnel','pyramid','progress']);
+
+// On the chart the selection came from, keep every value visible but fade
+// the unselected ones so the active selection is obvious (Qlik-style).
+function applySelectionHighlight(cfg, w) {
+  if (!HIGHLIGHT_TYPES.has(w.type)) return;
+  const sel = crossFilterValues(w.x);
+  if (!sel.size || !cfg.data || !cfg.data.labels) return;
+  const labels = cfg.data.labels.map(String);
+  if (!labels.some(l => sel.has(l))) return;
+  const dim = c => (typeof c === 'string' && c[0] === '#') ? hexA(c.slice(0, 7), 0.18) : 'rgba(136,144,176,0.18)';
+  cfg.data.datasets.forEach(ds => {
+    const base = ds.backgroundColor;
+    ds.backgroundColor = labels.map((l, i) => {
+      const c = Array.isArray(base) ? base[i % base.length] : base;
+      return sel.has(l) ? c : dim(c);
+    });
+  });
+}
+
+// Click an element → toggle a filter on this widget's X column.
+function attachCrossFilterClick(cfg, w) {
+  if (!CROSSFILTER_TYPES.has(w.type) || !w.x) return;
+  cfg.options = cfg.options || {};
+  cfg.options.onClick = (e, els, chart) => {
+    const el = els && els[0];
+    if (!el || !chart.data.labels) return;
+    const label = chart.data.labels[el.index];
+    if (label === undefined) return;
+    toggleCrossFilter(w.x, label, w.id);
+  };
+  cfg.options.onHover = (e, els) => { e.native.target.style.cursor = els && els.length ? 'pointer' : 'default'; };
+}
 
 function baseOpts(extra={}) {
   return Object.assign({
@@ -4922,9 +5182,7 @@ function renderUpCards() {
   if (!adminWidgetsCache.length) { wrap.innerHTML = '<div class="bhint">No graphs exist yet.</div>'; return; }
   wrap.innerHTML = adminWidgetsCache.map((w, i) => {
     const cur = upPermMap[w.widget_id] || 'hidden';
-    const icon = TYPE_ICONS[w.type] || '📊';
     return `<div class="graph-card" data-wid="${escapeHtml(w.widget_id)}" style="animation-delay:${Math.min(i * 25, 300)}ms">
-      <div class="gc-thumb">${icon}</div>
       <div class="gc-body">
         <div class="gc-name" title="${escapeHtml(w.title)}">${escapeHtml(w.title)}</div>
         <div class="gc-dash">${escapeHtml(w.dashboard_title || '')}</div>
@@ -5098,7 +5356,28 @@ function init() {
   $('#builderCancel').onclick = closeBuilder;
   $('#builderSave').onclick = saveBuilder;
   $('#builderOverlay').addEventListener('click', e=>{ if (e.target.id==='builderOverlay') closeBuilder(); });
-  $('#refreshBtn').onclick = ()=>{ renderGrid(); toast('Refreshed'); };
+  $('#refreshBtn').onclick = ()=>{ renderGrid(); stampUpdated(); toast('Refreshed'); };
+  $('#kioskBtn').onclick = enterKiosk;
+  // Command palette (Ctrl/Cmd+K)
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      $('#cmdkOverlay').classList.contains('open') ? closeCmdk() : openCmdk();
+    }
+  });
+  $('#cmdkOverlay').addEventListener('click', e => { if (e.target.id === 'cmdkOverlay') closeCmdk(); });
+  $('#cmdkInput').oninput = () => renderCmdkList($('#cmdkInput').value);
+  $('#cmdkInput').onkeydown = e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); cmdkMove(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkMove(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); runCmdk(cmdkIndex); }
+  };
+  $('#autoRefreshSel').onchange = () => {
+    state.refreshSec = +$('#autoRefreshSel').value || 0;
+    scheduleAutoRefresh();
+    if (canEditCurrent && state.id) saveState();   // persists with the dashboard
+    toast(state.refreshSec ? `Auto-refresh: every ${state.refreshSec >= 60 ? (state.refreshSec / 60) + 'm' : state.refreshSec + 's'}` : 'Auto-refresh off');
+  };
   $('#dashTitle').onchange = saveState;
 
   // ── Builder inline data source wiring ──
@@ -5149,7 +5428,7 @@ function init() {
   $('#rangeFrom').onchange = ()=>{ renderGrid(); };
   $('#rangeTo').onchange = ()=>{ renderGrid(); };
   $('#dateCol').onchange = ()=>{ renderGrid(); };
-  $('#clearFilters').onclick = ()=>{ $('#timeRange').value='all'; $('#globalSearch').value=''; $('#graphSearch').value=''; $('#rangeFrom').value=''; $('#rangeTo').value=''; $('#customRangeField').style.display='none'; renderGrid(); };
+  $('#clearFilters').onclick = ()=>{ $('#timeRange').value='all'; $('#globalSearch').value=''; $('#graphSearch').value=''; $('#rangeFrom').value=''; $('#rangeTo').value=''; $('#customRangeField').style.display='none'; mapSelection = null; crossFilters = []; renderGrid(); };
   let searchTimer;
   $('#globalSearch').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ renderGrid(); },180); };
   $('#graphSearch').oninput = filterGraphs;   // filter which graphs are shown by title
@@ -5167,10 +5446,14 @@ function init() {
   window.addEventListener('resize', ()=>{ syncStickyOffsets(); Object.values(charts).forEach(c=>{try{c.resize()}catch(e){}}); });
   document.addEventListener('keydown', e=>{
     if (e.key!=='Escape') return;
-    if ($('#tableOverlay').classList.contains('open')) closeTableModal();
+    if ($('#cmdkOverlay')?.classList.contains('open')) closeCmdk();
+    else if ($('#tableOverlay').classList.contains('open')) closeTableModal();
     else if ($('#builderOverlay').classList.contains('open')) closeBuilder();
+    else if (document.body.dataset.kiosk === '1') exitKiosk();
     else if (document.querySelector('.widget.maximized')) restoreMaximize();
   });
+  // Leaving browser fullscreen (Esc is captured by the browser there) also exits kiosk.
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) exitKiosk(); });
 
   // On every page load, end any DB connection left over from a previous
   // session so a refresh never shows stale tables/columns from the last
