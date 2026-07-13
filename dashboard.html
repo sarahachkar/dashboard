@@ -166,7 +166,7 @@ button { font-family: inherit; cursor: pointer; }
 
 /* Notifications bell + dropdown */
 .notif-menu { position: relative; flex: none; }
-.notif-btn { position: relative; width: 34px; height: 34px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.08); font-size: 16px; cursor: pointer; display: grid; place-items: center; }
+.notif-btn { position: relative; width: 34px; height: 34px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.08); color: #fff; font-size: 16px; cursor: pointer; display: grid; place-items: center; }
 .notif-btn:hover { border-color: var(--accent); background: rgba(124,92,252,0.18); }
 .notif-badge { position: absolute; top: -5px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; display: grid; place-items: center; line-height: 1; }
 .notif-dropdown { position: absolute; right: 0; top: calc(100% + 8px); width: 300px; max-width: 88vw; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); display: none; z-index: 60; overflow: hidden; }
@@ -484,7 +484,7 @@ select.input { cursor: pointer; }
 .searchbox .input { width: 100%; padding-left: 32px; }
 /* icon centered on the INPUT only (wrapper excludes the label above) */
 .search-input-wrap { position: relative; }
-.search-input-wrap::before { content: "🔍"; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; opacity: .6; pointer-events: none; line-height: 1; }
+.search-input-wrap::before { content: ""; width: 12px; height: 12px; background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%238890b0" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>') center/contain no-repeat; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; opacity: .6; pointer-events: none; line-height: 1; }
 
 /* ===== Dashboard grid ===== */
 /* ===== Card grid (Issue 1 + 8) ===== */
@@ -1005,14 +1005,14 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   <!-- Left group: brand + dashboard name/picker -->
   <div class="tb-group tb-left">
     <div class="tb-logo">N</div>
-    <button class="btn ghost sm icon-only" id="homeBtn" title="Home — all dashboards">🏠</button>
+    <button class="btn ghost sm icon-only" id="homeBtn" title="Home — all dashboards"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
     <input class="dash-title" id="dashTitle" value="Nexus Analytics" spellcheck="false" title="Rename this dashboard">
     <div class="dash-menu" id="dashMenu">
       <button class="dash-menu-btn" id="dashMenuBtn" title="Switch dashboard" aria-haspopup="true"><span id="dashMenuLabel">Dashboard</span><span class="dm-arrow">▾</span></button>
       <div class="dash-menu-panel" id="dashMenuPanel"></div>
     </div>
     <button class="btn ghost sm icon-only" id="newDashBtn" title="New dashboard">＋</button>
-    <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard">🗑</button>
+    <button class="btn ghost sm icon-only" id="delDashBtn" title="Delete this dashboard"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
     <span class="save-indicator saved" id="saveIndicator" title="Save status">✓ Saved</span>
   </div>
 
@@ -1039,14 +1039,14 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
     <button class="btn ghost sm icon-only tb-overflow-btn" id="overflowBtn" title="More" aria-haspopup="true">⋯</button>
 
     <!-- primary actions — always visible -->
-    <button class="btn ghost sm" id="shareBtn" title="Share this dashboard"><span class="btn-icon">🔗</span><span class="btn-label">Share</span></button>
-    <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">🛢</span><span class="btn-label">Connect DB</span></button>
-    <button class="btn ghost sm" id="adminBtn" title="Admin panel" style="display:none"><span class="btn-icon">⚙</span><span class="btn-label">Admin</span></button>
+    <button class="btn ghost sm" id="shareBtn" title="Share this dashboard"><span class="btn-icon">↗</span><span class="btn-label">Share</span></button>
+    <button class="btn ghost sm" id="openConnectBtn" title="Connect to a database"><span class="btn-icon">DB</span><span class="btn-label">Connect DB</span></button>
+    <button class="btn ghost sm" id="adminBtn" title="Admin panel" style="display:none"><span class="btn-icon">⚙︎</span><span class="btn-label">Admin</span></button>
     <button class="btn primary sm" id="newGraphBtn" title="Create a new graph"><span class="plus">+</span><span class="btn-label">New graph</span></button>
 
     <!-- notifications (bell → dropdown) -->
     <div class="notif-menu">
-      <button class="notif-btn" id="notifBtn" title="Notifications" aria-haspopup="true">🔔<span class="notif-badge" id="notifBadge" style="display:none">0</span></button>
+      <button class="notif-btn" id="notifBtn" title="Notifications" aria-haspopup="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="notif-badge" id="notifBadge" style="display:none">0</span></button>
       <div class="notif-dropdown" id="notifDropdown">
         <div class="nd-head">Notifications</div>
         <div id="notifList" class="nd-list"></div>
@@ -1217,7 +1217,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
         <div class="bds-pane" id="bdPane-manual">
           <div class="bhint" style="margin:0 0 8px">Type your data below, or <b>upload an Excel / CSV file</b>. Click a header to rename a column, then <b>Load</b>.</div>
           <div style="margin:0 0 8px">
-            <label class="btn sm" for="bdFileInput" style="cursor:pointer">⬆ Upload Excel / CSV</label>
+            <label class="btn sm" for="bdFileInput" style="cursor:pointer">Upload Excel / CSV</label>
             <input type="file" id="bdFileInput" accept=".xlsx,.xls,.csv" style="display:none">
           </div>
           <div class="manual-wrap" style="max-height:200px"><table class="manual" id="bdManualTable"></table></div>
@@ -1328,7 +1328,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       <h2>Admin — users</h2>
       <button class="icon-btn" id="adminClose" title="Close">Close</button>
     </div>
-    <div class="bhint" style="margin-bottom:12px">All accounts. Grant access to a dashboard from that dashboard's 🔗 Share button (View / Edit per user).</div>
+    <div class="bhint" style="margin-bottom:12px">All accounts. Grant access to a dashboard from that dashboard's Share button (View / Edit per user).</div>
     <div id="adminUsers" class="admin-users"></div>
   </div>
 </div>
@@ -1370,6 +1370,16 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 const LS_KEY = 'nexus_dashboard_v2';
+
+/* Minimal monochrome SVG glyphs (inherit currentColor) — no emoji anywhere. */
+const _svg = (paths) => `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+const ICON_SVG = {
+  edit: _svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+  trash: _svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
+  download: _svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>'),
+  home: _svg('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><polyline points="9 22 9 12 15 12 15 22"/>'),
+  bell: _svg('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'),
+};
 
 /* =====================================================================
    Backend API layer — auto-detected, graceful fallback to local mode.
@@ -1725,7 +1735,7 @@ function renderMapFilterChip() {
   if (!mapSelection && !crossFilters.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   bar.style.display = '';
   let html = '';
-  if (mapSelection) html += `<span class="mapfilter-chip"><span class="mf-lbl">🌍 Country:</span> ${escapeHtml(mapSelection)}
+  if (mapSelection) html += `<span class="mapfilter-chip"><span class="mf-lbl">Country:</span> ${escapeHtml(mapSelection)}
     <button class="mf-x" title="Clear country filter" onclick="clearMapSelection()">✕</button></span>`;
   html += crossFilters.map((f, i) => `<span class="mapfilter-chip"><span class="mf-lbl">${escapeHtml(f.col)}:</span> ${escapeHtml(f.val)}
     <button class="mf-x" title="Remove this filter" onclick="removeCrossFilter(${i})">✕</button></span>`).join('');
@@ -1984,6 +1994,7 @@ function cmdkSources() {
   const items = [];
   const act = (label, hint, run) => items.push({ kind: 'Action', label, hint, run });
   if (isEditorAcct() && canEditCurrent) act('New graph', 'open the graph builder', () => openBuilder());
+  if (isEditorAcct() && canEditCurrent) act('Auto-build dashboard', 'generate an overview view from your data', () => autoBuildDashboardView());
   act('Go home', 'dashboard folders', () => showHomePage());
   act('Toggle theme', 'light / dark', () => $('#themeBtn')?.click());
   act('Presentation mode', 'fullscreen, auto-cycles views', () => enterKiosk());
@@ -2052,6 +2063,48 @@ function openCmdk() {
   inp.focus();
 }
 function closeCmdk() { $('#cmdkOverlay')?.classList.remove('open'); }
+
+/* =====================================================================
+   Auto-build (dashboard template) — classifies the loaded dataset's
+   columns into date / category / measure and generates an "executive
+   overview" view: KPIs, a trend with forecast, top-categories bar with
+   an average line, a share donut, a heatmap and a detail table.
+   ===================================================================== */
+function autoBuildDashboardView() {
+  if (!requireEdit()) return;
+  const src = (dataset && dataset.rows.length) ? dataset : sampleData();
+  const snap = { columns: [...src.columns], rows: src.rows.map(r => ({ ...r })) };
+  // Reuse the column classifiers (they read the global `dataset`).
+  const prevDs = dataset; dataset = snap;
+  const dateCol = dateCols()[0] || null;
+  const cats = catCols().filter(c => c !== dateCol);
+  const nums = numericCols();
+  dataset = prevDs;
+  const cat0 = cats[0] || null, m0 = nums[0] || null;
+  if (!m0) return toast('No numeric column found to build graphs from', true);
+  const groupable = cat0 && new Set(snap.rows.map(r => r[cat0])).size <= 6;
+
+  const mk = (type, title, extra) => ({
+    id: uid(), type, title,
+    x: cat0 || dateCol || snap.columns[0], y: m0,
+    group: '', size: 'medium', theme: 'mixed', agg: 'sum',
+    savedDataset: snap, ...extra
+  });
+  const ws = [mk('kpi', 'Key metrics', { size: 'large' })];
+  if (dateCol) ws.push(mk('spline', `${m0} over time`, { x: dateCol, group: groupable ? cat0 : '', trend: groupable ? '' : 'linear', forecast: groupable ? 0 : 3 }));
+  if (cat0) {
+    ws.push(mk('bar', `${m0} by ${cat0}`, { showAvg: true }));
+    ws.push(mk('donut', `${m0} share by ${cat0}`));
+  }
+  if (cat0 && dateCol) ws.push(mk('heatmap', `${m0} — ${cat0} × ${dateCol}`, { x: dateCol, group: cat0 }));
+  ws.push(mk('table', 'Detail', { size: 'large' }));
+
+  state.views.push({ name: 'Auto overview', widgets: ws });
+  activeView = state.views.length - 1;
+  hideHomePage();
+  renderAll(); saveState();
+  toast(`Auto-built ${ws.length} graphs from ${snap.rows.length.toLocaleString()} rows`);
+}
 function setSaveIndicator(status) {   // 'saved' | 'unsaved' | 'saving'
   const el = $('#saveIndicator'); if (!el) return;
   el.className = 'save-indicator ' + status;
@@ -2206,7 +2259,7 @@ async function renderDashMenu() {
     let html = '<div class="dm-section">My Dashboards</div>';
     html += mine.length ? mine.map(d => `<button class="dm-item" data-open="${d.id}">${esc(d.title)}</button>`).join('') : '<div class="dm-hint">No dashboards yet</div>';
     if (isAdmin()) {
-      html += '<div class="dm-section">Browse</div><button class="dm-item" data-go="users">👥 Users<span class="dm-caret">›</span></button>';
+      html += '<div class="dm-section">Browse</div><button class="dm-item" data-go="users">Users<span class="dm-caret">›</span></button>';
     } else if (shared.length) {
       html += '<div class="dm-section">Shared with me</div>';
       html += shared.map(d => `<button class="dm-item" data-open="${d.id}">${esc(d.title)}<span class="dm-owner">${esc(d.owner_name || d.owner_email || '')}</span></button>`).join('');
@@ -2418,7 +2471,8 @@ function renderGrid() {
   const ws = widgets();
   if (!ws.length) {
     grid.innerHTML = `<div class="empty-canvas">No widgets yet.<br><br>
-      <button class="btn primary" onclick="openBuilder()">Create your first graph</button></div>`;
+      <button class="btn primary" onclick="openBuilder()">Create your first graph</button>
+      <button class="btn" style="margin-left:8px" onclick="autoBuildDashboardView()">Auto-build from data</button></div>`;
     return;
   }
   ws.forEach((w, i) => {
@@ -2488,10 +2542,10 @@ function buildWidget(w, idx) {
   // Editing controls are only emitted into the DOM for editable widgets.
   const canEditW = widgetEditable(w) && viewMode !== 'link';
   const editControls = canEditW
-    ? `<button class="icon-btn" title="Edit graph" data-act="edit">✏️</button>`
+    ? `<button class="icon-btn" title="Edit graph" data-act="edit">${ICON_SVG.edit}</button>`
     : '';
   const removeControl = canEditW
-    ? `<button class="icon-btn danger" title="Delete graph" data-act="remove">🗑</button>`
+    ? `<button class="icon-btn danger" title="Delete graph" data-act="remove">${ICON_SVG.trash}</button>`
     : '';
   const footHtml = canEditW ? `<div class="w-foot"><button class="w-edit-link" data-act="edit">Edit graph</button></div>` : '';
   el.innerHTML = `
@@ -2505,10 +2559,10 @@ function buildWidget(w, idx) {
       <div class="w-controls">
         ${editControls}
         ${canEditW ? `<button class="icon-btn" title="Cycle size (small / medium / large)" data-act="size">${(w.size||'medium')[0].toUpperCase()}</button>` : ''}
-        <button class="icon-btn" title="Export PNG" data-act="export">⬇️</button>
+        <button class="icon-btn" title="Export PNG" data-act="export">${ICON_SVG.download}</button>
         <button class="icon-btn" title="Export CSV (data)" data-act="csv">⤓</button>
         ${canEditW && (typeof canEditCurrent === 'undefined' || canEditCurrent) ? `<button class="icon-btn" title="Duplicate graph" data-act="duplicate">⧉</button>` : ''}
-        <button class="icon-btn" title="Expand" data-act="maximize">⛶</button>
+        <button class="icon-btn" title="Expand" data-act="maximize">⛶︎</button>
         ${removeControl}
       </div>
     </div>
@@ -2589,7 +2643,7 @@ function restoreMaximize() {
   if (el) {
     el.classList.remove('maximized');
     const b = el.querySelector('[data-act="maximize"]');
-    if (b) { b.textContent = '⛶'; b.title = 'Expand'; }   // back to expand glyph when restored
+    if (b) { b.textContent = '⛶︎'; b.title = 'Expand'; }   // back to expand glyph when restored
     const id = el.dataset.id;
     setTimeout(()=>{ if (charts[id]) { try{charts[id].resize()}catch(e){} } }, 60);
   }
@@ -2655,7 +2709,7 @@ function widgetSubtitle(w, count) {
   // Flag widgets whose source DB connection is no longer connected
   if (w.connectionId) {
     const c = connById(w.connectionId);
-    if (!c || c.status !== 'connected') sub += ' · ⚠ source disconnected';
+    if (!c || c.status !== 'connected') sub += ' · ⚠︎ source disconnected';
   }
   return sub;
 }
@@ -2725,7 +2779,7 @@ function renderWidgetBody(w) {
     attachCrossFilterClick(cfg, w);
     charts[w.id] = new Chart(canvas.getContext('2d'), cfg);
   } catch (err) {
-    body.innerHTML = `<div class="w-error"><div class="big">⚠</div>${escapeHtml(err.message)}<br>
+    body.innerHTML = `<div class="w-error"><div class="big">⚠︎</div>${escapeHtml(err.message)}<br>
       <span style="color:var(--text-dim);font-size:11px">Adjust the axis/type selectors below.</span></div>`;
   }
   dataset = prevDs;
@@ -2930,17 +2984,106 @@ function buildChartConfig(w, rows) {
     const totals = labels.map((_,i)=> datasets.reduce((s,ds)=> s+(+ds.data[i]||0), 0) || 1);
     datasets.forEach(ds => ds.data = ds.data.map((v,i)=> round((+v||0)/totals[i]*100)));
   }
-  return {
+  const cfg = {
     type: isLine ? 'line' : 'bar',
-    data:{ labels, datasets },
+    data:{ labels: [...labels], datasets },
     options: baseOpts({
       indexAxis: isH?'y':'x',
       scales: isSpark ? { x:{display:false}, y:{display:false} } : stackScales(isStack),
       plugins: isSpark ? { legend:{display:false} } : legendC()
     })
   };
+  applyTrendline(cfg, w, grouped, isH);
+  applyRefLines(cfg, w, isH);
+  return cfg;
 }
 function legendC(){ return { legend:{ labels:{ color:textColor(), boxWidth:12, font:{size:11} } } }; }
+
+/* =====================================================================
+   Analytics overlays — trendline / moving average / forecast, plus
+   average & target reference lines (the markLine idea from ECharts).
+   ===================================================================== */
+// Chart.js plugin: draws dashed horizontal (or vertical for hbar) reference
+// lines with a small label. Activated per-chart via options.plugins.refLines.
+const refLinesPlugin = {
+  id: 'refLines',
+  afterDatasetsDraw(chart, _args, opts) {
+    const lines = (opts && opts.lines) || [];
+    if (!lines.length || !chart.chartArea) return;
+    const horiz = opts.indexAxis === 'y';
+    const scale = horiz ? chart.scales.x : chart.scales.y;
+    if (!scale) return;
+    const { ctx, chartArea: a } = chart;
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.font = '600 10px Inter, sans-serif';
+    lines.forEach(l => {
+      const px = scale.getPixelForValue(l.value);
+      if (!isFinite(px)) return;
+      ctx.strokeStyle = l.color; ctx.fillStyle = l.color;
+      ctx.beginPath();
+      if (horiz) { if (px < a.left || px > a.right) return; ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom); }
+      else { if (px < a.top || px > a.bottom) return; ctx.moveTo(a.left, px); ctx.lineTo(a.right, px); }
+      ctx.stroke();
+      const text = `${l.label}: ${round(l.value)}`;
+      if (horiz) ctx.fillText(text, Math.min(px + 4, a.right - ctx.measureText(text).width), a.top + 10);
+      else ctx.fillText(text, a.right - ctx.measureText(text).width - 4, px - 4);
+    });
+    ctx.restore();
+  }
+};
+Chart.register(refLinesPlugin);
+
+// Chart types the Analytics section (trend / reference lines) applies to.
+const ANALYTICS_TYPES = ['line','spline','step','sparkline','area','stackedArea','bar','column','stacked','stacked100','hbar','hstacked'];
+
+// Dashed trend overlay on the first series: least-squares linear fit
+// (optionally extended `w.forecast` periods past the data) or moving average.
+function applyTrendline(cfg, w, grouped, isH) {
+  if (!w.trend || w.trend === 'none' || grouped || isH) return;
+  const values = (cfg.data.datasets[0]?.data || []).map(Number).filter(v => !isNaN(v));
+  if (values.length < 2) return;
+  const dash = { type: 'line', data: [], borderColor: textColor(), borderDash: [6, 4],
+                 borderWidth: 2, pointRadius: 0, pointHitRadius: 0, fill: false, tension: 0, order: 0 };
+  if (w.trend === 'avg') {
+    const win = values.length >= 20 ? 7 : 3;
+    dash.label = `Moving avg (${win})`;
+    dash.tension = .35;
+    dash.data = values.map((_, i) => {
+      const s = values.slice(Math.max(0, i - win + 1), i + 1);
+      return round(s.reduce((x, y) => x + y, 0) / s.length);
+    });
+  } else {
+    // Linear regression y = a + b·x over the point index.
+    const n = values.length;
+    const sumX = n * (n - 1) / 2, sumY = values.reduce((x, y) => x + y, 0);
+    const sumXY = values.reduce((x, y, i) => x + i * y, 0);
+    const sumX2 = values.reduce((x, _, i) => x + i * i, 0);
+    const den = n * sumX2 - sumX * sumX || 1;
+    const b = (n * sumXY - sumX * sumY) / den, a0 = (sumY - b * sumX) / n;
+    const f = Math.max(0, Math.min(24, +w.forecast || 0));
+    dash.label = f ? 'Trend / forecast' : 'Trend';
+    dash.data = Array.from({ length: n + f }, (_, i) => round(a0 + b * i));
+    for (let i = 1; i <= f; i++) cfg.data.labels.push('+' + i);   // forecast periods extend the axis
+  }
+  cfg.data.datasets.push(dash);
+}
+
+// Average-of-first-series and/or fixed target reference lines.
+function applyRefLines(cfg, w, isH) {
+  const lines = [];
+  if (w.showAvg) {
+    const vals = (cfg.data.datasets[0]?.data || []).map(Number).filter(v => !isNaN(v));
+    if (vals.length) lines.push({ value: vals.reduce((x, y) => x + y, 0) / vals.length, label: 'Avg', color: textColor() });
+  }
+  if (w.target !== undefined && w.target !== null && w.target !== '' && !isNaN(+w.target)) {
+    lines.push({ value: +w.target, label: 'Target', color: getComputedStyle(document.body).getPropertyValue('--warn').trim() || '#ffb340' });
+  }
+  if (!lines.length) return;
+  cfg.options.plugins = cfg.options.plugins || {};
+  cfg.options.plugins.refLines = { lines, indexAxis: isH ? 'y' : 'x' };
+}
 function stackScales(stack){
   const a = axisOpts();
   if (stack){ a.x.stacked=true; a.y.stacked=true; }
@@ -3420,7 +3563,7 @@ function renderWaterfall(w, container, rows) {
       })
     });
   } catch (err) {
-    holder.innerHTML = `<div class="w-error"><div class="big">⚠</div>${escapeHtml(err.message)}</div>`;
+    holder.innerHTML = `<div class="w-error"><div class="big">⚠︎</div>${escapeHtml(err.message)}</div>`;
     return null;
   }
 }
@@ -3667,7 +3810,7 @@ function renderSankey(w, container, rows) {
       label.textContent = n.name.length > 20 ? n.name.slice(0, 19) + '…' : n.name; svg.appendChild(label);
     });
   } catch (err) {
-    holder.innerHTML = `<div class="w-error"><div class="big">⚠</div>Sankey error: ${escapeHtml(err.message)}<br><span style="color:var(--text-dim);font-size:11px">Source and target must form an acyclic flow.</span></div>`;
+    holder.innerHTML = `<div class="w-error"><div class="big">⚠︎</div>Sankey error: ${escapeHtml(err.message)}<br><span style="color:var(--text-dim);font-size:11px">Source and target must form an acyclic flow.</span></div>`;
     return;
   }
   wrap.appendChild(svg); holder.appendChild(wrap); holder.appendChild(tip);
@@ -4461,9 +4604,37 @@ function renderBuilderForm() {
     ${d.type === 'pareto' ? `<div class="bhint">Barres triées de la plus grande à la plus petite + ligne du <b>% cumulé</b> — repère vite les catégories qui pèsent le plus (règle 80/20).</div>` : ''}
     ${d.type === 'radialbar' ? `<div class="bhint">Anneaux concentriques animés — un par catégorie (top 8), longueur d'arc proportionnelle à la valeur.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+    ${ANALYTICS_TYPES.includes(d.type) ? `
+    <div class="bfield">
+      <label>Analytics</label>
+      <div class="brow">
+        <div class="bfield"><label>Trendline</label>
+          <select class="binput" id="bTrend">
+            <option value="" ${!d.trend || d.trend === 'none' ? 'selected' : ''}>None</option>
+            <option value="linear" ${d.trend === 'linear' ? 'selected' : ''}>Linear trend</option>
+            <option value="avg" ${d.trend === 'avg' ? 'selected' : ''}>Moving average</option>
+          </select>
+        </div>
+        <div class="bfield"><label>Forecast periods</label>
+          <input class="binput" id="bForecast" type="number" min="0" max="24" value="${+d.forecast || 0}" ${d.trend === 'linear' ? '' : 'disabled'}>
+        </div>
+      </div>
+      <div class="brow">
+        <div class="bfield"><label>Average line</label>
+          <select class="binput" id="bShowAvg">
+            <option value="">Off</option>
+            <option value="1" ${d.showAvg ? 'selected' : ''}>Show</option>
+          </select>
+        </div>
+        <div class="bfield"><label>Target line (value)</label>
+          <input class="binput" id="bTarget" type="number" value="${d.target ?? ''}" placeholder="e.g. 5000">
+        </div>
+      </div>
+      <div class="bhint">Trendline &amp; forecast fit the first series (single-series charts). Reference lines are drawn on the value axis.</div>
+    </div>` : ''}
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
-      <label>🌍 Link to world map</label>
+      <label>Link to world map</label>
       <select class="binput" id="bLinkCountry">
         <option value="" ${!d.linkCountry ? 'selected' : ''}>Auto-detect country column</option>
         <option value="__none__" ${d.linkCountry === '__none__' ? 'selected' : ''}>Don't react to map clicks</option>
@@ -4478,7 +4649,7 @@ function renderBuilderForm() {
       <div id="bThresholds"></div>
       <button type="button" class="btn sm" id="bAddThreshold" style="margin-top:8px">+ Add rule</button>
     </div>` : ''}
-    ${cols.length ? '' : '<div class="bhint" style="color:var(--warn)">⚠ Open the <b>Data source</b> section above to load data first — then your column selectors will appear.</div>'}
+    ${cols.length ? '' : '<div class="bhint" style="color:var(--warn)">⚠︎ Open the <b>Data source</b> section above to load data first — then your column selectors will appear.</div>'}
   `;
   $('#bTitle').oninput = e => { d.title = e.target.value; };
   renderBtypeGrid();   // few types + "View all" + live search (focus preserved)
@@ -4489,6 +4660,18 @@ function renderBuilderForm() {
   bind('#bGanttStart', 'ganttStart'); bind('#bGanttEnd', 'ganttEnd');
   bind('#bSankeySource', 'sankeySource'); bind('#bSankeyTarget', 'sankeyTarget');
   bind('#bBulletTarget', 'bulletTarget'); bind('#bSlopeEnd', 'slopeEnd'); bind('#bComboLine', 'comboLine');
+  // Analytics section (trend / forecast / reference lines)
+  const bTrend = $('#bTrend');
+  if (bTrend) {
+    bTrend.onchange = () => {
+      d.trend = bTrend.value || '';
+      const bf = $('#bForecast'); if (bf) bf.disabled = d.trend !== 'linear';
+      builderPreview();
+    };
+    $('#bForecast').onchange = () => { d.forecast = Math.max(0, Math.min(24, +$('#bForecast').value || 0)); builderPreview(); };
+    $('#bShowAvg').onchange = () => { d.showAvg = !!$('#bShowAvg').value; builderPreview(); };
+    $('#bTarget').onchange = () => { const v = $('#bTarget').value; d.target = v === '' ? null : +v; builderPreview(); };
+  }
   if (THRESHOLD_TYPES.includes(d.type)) {
     renderThresholdRows();
     $('#bAddThreshold').onclick = () => { d.thresholds = d.thresholds || []; d.thresholds.push({ op: 'lt', value: 0, color: '#e24b4a' }); renderThresholdRows(); builderPreview(); };
@@ -4594,7 +4777,7 @@ function builderPreview() {
     holder.appendChild(c);
     builderChart = new Chart(c.getContext('2d'), buildChartConfig(d, rows));
   } catch (err) {
-    holder.innerHTML = `<div class="bpreview-empty">⚠ ${escapeHtml(err.message)}<br>Try different X / Y fields.</div>`;
+    holder.innerHTML = `<div class="bpreview-empty">⚠︎ ${escapeHtml(err.message)}<br>Try different X / Y fields.</div>`;
   }
   if (builderDataset) dataset = prev;
 }
@@ -4988,7 +5171,7 @@ function renderConnections() {
         ${c.status === 'connected'
           ? `<button class="btn sm" data-act="disconnect">Disconnect</button>`
           : `<button class="btn sm primary" data-act="connect">Connect</button>`}
-        <button class="btn sm" data-act="delete" title="Delete connection">🗑</button>
+        <button class="btn sm" data-act="delete" title="Delete connection">Delete</button>
       </div>
     </div>`).join('');
   wrap.querySelectorAll('.conn-item').forEach(item => {
@@ -5190,9 +5373,9 @@ function renderUpCards() {
       </div>
       <button class="gc-menu-btn" title="Change access">⋮</button>
       <div class="gc-menu">
-        <button data-set="viewer" class="${cur==='viewer'?'active':''}">👁 View</button>
-        <button data-set="editor" class="${cur==='editor'?'active':''}">✏️ Edit</button>
-        <button data-set="hide" class="danger ${cur==='hidden'?'active':''}">🚫 Hide</button>
+        <button data-set="viewer" class="${cur==='viewer'?'active':''}">View</button>
+        <button data-set="editor" class="${cur==='editor'?'active':''}">Edit</button>
+        <button data-set="hide" class="danger ${cur==='hidden'?'active':''}">Hide</button>
       </div>
     </div>`;
   }).join('');
