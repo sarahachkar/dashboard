@@ -639,7 +639,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { connections: rows.map(publicConn) });   // never includes password
     }
     if (p === '/api/connections' && m === 'POST') {
-      if (!requireEditorOrAdmin(authUser, res)) return;   // viewers cannot add connections
+      // any signed-in account may add its own connections (per-user, encrypted at rest)
       const b = await readBody(req);
       if (!b.host || !b.database) return sendJson(res, 400, { error: 'host and database are required' });
       const id = 'conn_' + crypto.randomBytes(6).toString('hex');
@@ -663,7 +663,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true });
       }
       if (action === 'connect' && m === 'POST') {
-        if (!requireEditorOrAdmin(authUser, res)) return;   // viewers cannot open connections
+        // ownership already checked above — any account may open its own connection
         const Pool = getPg();
         if (!Pool) return sendJson(res, 500, { error: 'Postgres support not installed (npm install pg)' });
         const pool = new Pool({ connectionString: connectionString(row), connectionTimeoutMillis: 8000 });

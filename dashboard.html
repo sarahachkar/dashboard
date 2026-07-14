@@ -5159,7 +5159,8 @@ function applyAccountUI() {
   document.body.dataset.permission = (currentUser && currentUser.permission) || '';
   if (!admin) { $('#adminBtn')?.remove(); $('#shareBtn')?.remove(); }   // only the admin manages sharing
   if (!canEdit) {
-    ['#newGraphBtn','#openConnectBtn','#saveIndicator'].forEach(sel => $(sel)?.remove());
+    // Connect DB stays available to every account — connections are per-user.
+    ['#newGraphBtn','#saveIndicator'].forEach(sel => $(sel)?.remove());
   }
 }
 
