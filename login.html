@@ -15,19 +15,48 @@
 html,body{margin:0;height:100%;}
 body{
   background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif;
-  display:grid; place-items:center; padding:24px;
-  background-image:radial-gradient(ellipse at 20% 20%,rgba(124,92,252,.12) 0%,transparent 55%),
-                   radial-gradient(ellipse at 80% 80%,rgba(0,229,176,.08) 0%,transparent 55%);
+  display:grid; grid-template-columns:1.1fr 1fr; min-height:100vh;
+  background-image:radial-gradient(ellipse at 15% 20%,rgba(124,92,252,.12) 0%,transparent 55%),
+                   radial-gradient(ellipse at 85% 85%,rgba(0,229,176,.08) 0%,transparent 55%);
 }
+/* ===== Left: product hero ===== */
+.hero{
+  display:flex; flex-direction:column; justify-content:space-between;
+  padding:48px 56px; border-right:1px solid var(--border);
+}
+.brand{display:flex; align-items:center; gap:12px;}
+.brand .logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent-2));
+  display:grid;place-items:center;font-weight:800;font-size:18px;color:#fff;box-shadow:0 0 18px rgba(124,92,252,.5);}
+.brand .bn{font-size:19px;font-weight:800;
+  background:linear-gradient(90deg,#c4b0ff,#80ffdb);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+.brand .bt{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);}
+.hero-mid{max-width:520px;}
+.badge{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(124,92,252,.5);color:#c4b0ff;
+  border-radius:999px;padding:7px 14px;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:22px;}
+.badge i{width:7px;height:7px;border-radius:50%;background:var(--accent-2);display:inline-block;}
+h2.head{font-size:clamp(34px,4vw,52px);line-height:1.06;font-weight:800;margin:0 0 18px;}
+h2.head .hl{background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+.pitch{color:var(--text-dim);font-size:16px;line-height:1.65;margin:0 0 30px;max-width:44ch;}
+.preview{display:grid;grid-template-columns:auto auto 1fr;gap:14px;align-items:stretch;}
+.tile{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px 18px;box-shadow:0 10px 30px rgba(0,0,0,.35);}
+.tile .tl{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:5px;}
+.tile .tv{font-size:24px;font-weight:800;}
+.tile .tt{font-size:11.5px;font-weight:700;color:var(--accent-2);margin-top:3px;}
+.tile.spark{display:grid;place-items:center;padding:10px 14px;min-width:170px;}
+.tile.spark svg{width:100%;height:64px;display:block;}
+.feats{display:flex;flex-wrap:wrap;gap:22px;color:var(--text-dim);font-size:13px;}
+.feats span{display:inline-flex;align-items:center;gap:7px;}
+.feats svg{width:13px;height:13px;color:var(--accent-2);}
+/* ===== Right: sign-in card ===== */
+.side{display:grid;place-items:center;padding:32px;}
 .auth-card{
   width:100%; max-width:400px; background:var(--panel); border:1px solid var(--border);
   border-radius:18px; padding:34px 30px; box-shadow:0 24px 70px rgba(0,0,0,.45);
+  border-top:3px solid transparent;
+  background-clip:padding-box; position:relative;
 }
-.brand{display:flex; align-items:center; gap:11px; margin-bottom:22px;}
-.brand .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent-2));
-  display:grid;place-items:center;font-weight:800;color:#fff;box-shadow:0 0 16px rgba(124,92,252,.55);}
-.brand .name{font-size:18px;font-weight:800;
-  background:linear-gradient(90deg,#c4b0ff,#80ffdb);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+.auth-card::before{content:"";position:absolute;inset:-1px -1px auto -1px;height:3px;border-radius:18px 18px 0 0;
+  background:linear-gradient(90deg,var(--accent),var(--accent-2),#ff9ac4);}
 h1{font-size:22px;font-weight:700;margin:0 0 4px;}
 .sub{color:var(--text-dim);font-size:13.5px;margin:0 0 22px;}
 label{display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin:0 0 6px;}
@@ -49,13 +78,54 @@ input:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(124,92,252,.2)
 .alt{margin-top:20px;text-align:center;font-size:13.5px;color:var(--text-dim);}
 .alt a{color:var(--accent);text-decoration:none;font-weight:600;}
 .alt a:hover{text-decoration:underline;}
+@media (max-width:900px){
+  body{grid-template-columns:1fr;}
+  .hero{display:none;}
+}
 </style>
 </head>
 <body>
+
+<div class="hero">
+  <div class="brand">
+    <div class="logo">N</div>
+    <div><div class="bn">Nexus Analytics</div><div class="bt">Business intelligence, live</div></div>
+  </div>
+
+  <div class="hero-mid">
+    <span class="badge"><i></i>Every metric, one place</span>
+    <h2 class="head">See your data<br><span class="hl">come alive.</span></h2>
+    <p class="pitch">Connect your databases, build dashboards your whole team can trust,
+      and watch everything move in real time — cross-filtering, alerts, forecasts and
+      one-click insights included.</p>
+    <div class="preview">
+      <div class="tile"><div class="tl">Revenue</div><div class="tv">$418K</div><div class="tt">▲ 12.4%</div></div>
+      <div class="tile"><div class="tl">Uptime</div><div class="tv">99.98%</div><div class="tt">▲ steady</div></div>
+      <div class="tile spark">
+        <svg viewBox="0 0 200 64" preserveAspectRatio="none" aria-hidden="true">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#7c5cfc" stop-opacity=".45"/><stop offset="1" stop-color="#7c5cfc" stop-opacity="0"/>
+          </linearGradient></defs>
+          <path d="M0 50 L25 44 L50 47 L75 36 L100 40 L125 28 L150 32 L175 18 L200 8 L200 64 L0 64 Z" fill="url(#g)"/>
+          <path d="M0 50 L25 44 L50 47 L75 36 L100 40 L125 28 L150 32 L175 18 L200 8" fill="none" stroke="#7c5cfc" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+          <circle cx="200" cy="8" r="3.5" fill="#00e5b0"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="feats">
+    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Live dashboards</span>
+    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Your own databases</span>
+    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Roles &amp; sharing</span>
+    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Alerts &amp; insights</span>
+  </div>
+</div>
+
+<div class="side">
 <form class="auth-card" id="form" autocomplete="on">
-  <div class="brand"><div class="logo">N</div><div class="name">Nexus Analytics</div></div>
   <h1>Welcome back</h1>
-  <p class="sub">Sign in to your dashboard.</p>
+  <p class="sub">Sign in to your dashboards.</p>
 
   <div class="field">
     <label for="email">Email</label>
@@ -70,6 +140,7 @@ input:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(124,92,252,.2)
 
   <div class="alt">Don't have an account? <a href="/signup">Create one</a></div>
 </form>
+</div>
 
 <script>
 const form = document.getElementById('form');

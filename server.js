@@ -721,16 +721,26 @@ const server = http.createServer(async (req, res) => {
     const isAdminUser = isAdminAcct(authUser);
     if (p === '/api/dashboards' && m === 'GET') {
       const rows = isAdminUser
-        ? db.prepare(`SELECT d.id, d.title, d.owner_id, d.share_token, d.updated_at,
+        ? db.prepare(`SELECT d.id, d.title, d.owner_id, d.share_token, d.updated_at, d.state_json,
                              u.name AS owner_name, u.email AS owner_email
                       FROM dashboards d JOIN app_users u ON u.id = d.owner_id
                       ORDER BY d.updated_at DESC`).all()
-        : db.prepare(`SELECT d.id, d.title, d.owner_id, d.share_token, d.updated_at,
+        : db.prepare(`SELECT d.id, d.title, d.owner_id, d.share_token, d.updated_at, d.state_json,
                              u.name AS owner_name, u.email AS owner_email
                       FROM dashboards d JOIN app_users u ON u.id = d.owner_id
                       WHERE d.owner_id=? OR d.id IN (SELECT dashboard_id FROM dashboard_permissions WHERE user_id=?)
                       ORDER BY d.updated_at DESC`).all(authUser.id, authUser.id);
-      return sendJson(res, 200, { dashboards: rows.map(r => ({ ...r, mine: r.owner_id === authUser.id })) });
+      return sendJson(res, 200, { dashboards: rows.map(r => {
+        // widget/view counts for richer dashboard cards (cheap: lists are small)
+        let widgets = 0, views = 0;
+        try {
+          const st = JSON.parse(r.state_json || '{}');
+          views = (st.views || []).length;
+          widgets = (st.views || []).reduce((s, v) => s + ((v.widgets || []).length), 0);
+        } catch (e) { /* corrupt state — counts stay 0 */ }
+        const { state_json, ...pub } = r;
+        return { ...pub, widgets, views, mine: r.owner_id === authUser.id };
+      }) });
     }
 
     if (p === '/api/dashboards' && m === 'POST') {

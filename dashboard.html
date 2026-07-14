@@ -192,20 +192,35 @@ button { font-family: inherit; cursor: pointer; }
 .user-dropdown #logoutBtn { width: 100%; justify-content: center; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
 .user-dropdown #logoutBtn:hover { background: rgba(255,94,122,0.12); border-color: var(--danger); color: var(--danger); }
 
-/* Collapse secondary controls (rows/engine/Refresh/Theme) into the ⋯ menu.
-   Primary actions (Share, Connect DB, Admin, New graph) + user menu stay visible. */
-@media (max-width: 1024px) {
+/* Toolbar items must NEVER shrink-overlap each other — the title is the only
+   flexible element; everything else keeps its natural width. */
+.toolbar .btn, .toolbar .badge, .dash-menu-btn, .dash-picker, .toolbar select,
+.tb-group, .notif-menu, .user-menu, .save-indicator { flex: none; }
+.dash-title { width: clamp(120px, 16vw, 260px); flex: 0 1 auto; min-width: 0; }
+
+/* Collapse secondary controls (rows/engine/Refresh/Auto/Insights/Present/Theme)
+   into the ⋯ menu whenever the full row wouldn't fit. Primary actions
+   (Share, Connect DB, Admin, New graph) + user menu stay visible. */
+@media (max-width: 1800px) {
   .tb-overflow-btn { display: inline-flex; }
   .tb-secondary {
     position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
     flex-direction: column; align-items: stretch; gap: 6px;
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    box-shadow: var(--shadow); padding: 10px; min-width: 180px; display: none;
+    box-shadow: var(--shadow); padding: 10px; min-width: 200px; display: none;
   }
   .tb-secondary.open { display: flex; }
-  .tb-secondary .btn { justify-content: flex-start; }
+  /* Inside the dropdown panel the toolbar's white ghost styling must not win */
+  .toolbar .tb-secondary .btn, .toolbar .tb-secondary .btn.ghost {
+    justify-content: flex-start; background: transparent; border-color: transparent; color: var(--text);
+  }
+  .toolbar .tb-secondary .btn:hover, .toolbar .tb-secondary .btn.ghost:hover {
+    background: var(--panel-2); color: var(--text); box-shadow: none; border-color: transparent;
+  }
   .tb-secondary .btn .btn-label { display: inline; }   /* labels visible inside the menu */
-  .tb-secondary .badge { align-self: flex-start; }
+  .tb-secondary .btn .btn-icon { display: none; }
+  .tb-secondary .badge, .tb-secondary #lastUpdated { align-self: flex-start; }
+  .tb-secondary #autoRefreshSel { max-width: none !important; background: var(--panel-2); color: var(--text); border-color: var(--border); }
 }
 
 /* ===== Connection manager ===== */
@@ -291,10 +306,10 @@ body[data-readonly="true"] .empty-canvas .btn { display: none !important; }
 .widget.w-readonly [data-act="remove"],
 .widget.w-readonly [data-act="size"],
 .widget.w-readonly [data-act="duplicate"],
-.widget.w-readonly .w-foot { display: none !important; }
-/* Public share-link view is fully read-only on every widget */
+.widget.w-readonly .w-edit-link { display: none !important; }
+/* Public share-link view is fully read-only on every widget (meta stays) */
 body[data-viewmode="link"] .w-controls,
-body[data-viewmode="link"] .w-foot { display: none !important; }
+body[data-viewmode="link"] .w-edit-link { display: none !important; }
 /* Public share-link view: also hide the whole app chrome (picker, connect, etc.) */
 body[data-viewmode="link"] #dashPicker,
 body[data-viewmode="link"] #newDashBtn,
@@ -747,6 +762,27 @@ body[data-viewmode="link"] #homeBtn, body[data-viewmode="link"] #homePage { disp
 .hp-inner { max-width: 1080px; margin: 0 auto; padding: 34px 24px 60px; }
 .hp-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
 .hp-head h2 { margin: 0; font-size: 22px; font-weight: 800; color: var(--text); }
+.hp-search { margin-left: auto; width: min(300px, 40vw); }
+.hp-search input { width: 100%; padding-left: 30px; }
+/* Recent chips row (spans the whole grid) */
+.hp-recent { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
+.hp-recent .hr-lbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin-right: 2px; }
+.hr-chip { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hr-chip:hover { border-color: var(--accent); color: var(--accent); }
+/* Quick time-range chips in the filter bar */
+.qr-chips { display: flex; gap: 6px; align-items: center; height: 38px; }
+.qr-chip { background: var(--panel); border: 1.5px solid var(--border); color: var(--text-dim); border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer; transition: all .15s; white-space: nowrap; }
+.qr-chip:hover { border-color: var(--accent); color: var(--accent); }
+.qr-chip.on { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border-color: var(--accent); color: var(--accent); }
+/* Per-card footer meta (rows + freshness) */
+.w-foot .w-meta { margin-right: auto; font-size: 11px; color: var(--text-dim); }
+/* Favorite star on dashboard cards */
+.hc-fav { position: absolute; top: 10px; right: 64px; width: 24px; height: 24px; border: none; background: transparent; color: var(--text-dim); display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .12s, color .12s, transform .12s; border-radius: 6px; }
+.hp-card:hover .hc-fav, .hp-card:focus-within .hc-fav, .hc-fav.on { opacity: 1; }
+.hc-fav:hover { transform: scale(1.15); color: var(--warn, #ffb340); }
+.hc-fav.on { color: var(--warn, #ffb340); }
+.hc-fav.on svg { fill: currentColor; }
+.hp-card .hc-owner { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hp-back { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .hp-back:hover { border-color: var(--accent); color: var(--accent); }
 .hp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
@@ -1145,6 +1181,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
       <div class="hp-head">
         <button class="hp-back" id="hpBack" style="display:none">‹ Back</button>
         <h2 id="hpTitle">Home</h2>
+        <div class="search-input-wrap hp-search"><input class="input" id="hpSearch" placeholder="Search dashboards…" autocomplete="off"></div>
       </div>
       <div class="hp-grid" id="hpGrid"></div>
     </div>
@@ -1165,6 +1202,15 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
           <option value="90d">Last 90 days</option>
           <option value="custom">Custom range…</option>
         </select>
+      </div>
+      <div class="field">
+        <label>Quick range</label>
+        <div class="qr-chips">
+          <button class="qr-chip" data-qr="7d">7 days</button>
+          <button class="qr-chip" data-qr="30d">30 days</button>
+          <button class="qr-chip" data-qr="90d">90 days</button>
+          <button class="qr-chip" data-qr="all">All time</button>
+        </div>
       </div>
       <div class="field" id="customRangeField" style="display:none">
         <label>From — To</label>
@@ -2191,7 +2237,7 @@ function askYourData(q) {
   const snap = { columns: [...src.columns], rows: src.rows.map(r => ({ ...r })) };
   const spec = parseAskQuery(q, snap);
   if (!spec) return toast('Could not understand that — try “revenue by category as pie”', true);
-  const w = { id: uid(), group: '', size: 'medium', theme: 'mixed', savedDataset: snap, ...spec };
+  const w = { id: uid(), group: '', size: 'medium', theme: 'mixed', savedDataset: snap, savedAt: Date.now(), ...spec };
   widgets().push(w);
   hideHomePage(); renderGrid(); saveState();
   toast(`Created a ${spec.type} graph from “${q}”`);
@@ -2358,7 +2404,7 @@ function openInsights() {
     </div>`).join('') : '<div class="bhint">No notable patterns found in this dataset.</div>';
   list.querySelectorAll('[data-ins]').forEach(btn => btn.onclick = () => {
     const ins = insights[+btn.dataset.ins];
-    const w = { id: uid(), group: '', size: 'medium', theme: 'mixed', savedDataset: snap, ...ins.spec };
+    const w = { id: uid(), group: '', size: 'medium', theme: 'mixed', savedDataset: snap, savedAt: Date.now(), ...ins.spec };
     widgets().push(w);
     closeInsights(); hideHomePage();
     renderGrid(); saveState();
@@ -2396,7 +2442,7 @@ function autoBuildDashboardView() {
     id: uid(), type, title,
     x: cat0 || dateCol || snap.columns[0], y: m0,
     group: '', size: 'medium', theme: 'mixed', agg: 'sum',
-    savedDataset: snap, ...extra
+    savedDataset: snap, savedAt: Date.now(), ...extra
   });
   const ws = [mk('kpi', 'Key metrics', { size: 'large' })];
   if (dateCol) ws.push(mk('spline', `${m0} over time`, { x: dateCol, group: groupable ? cat0 : '', trend: groupable ? '' : 'linear', forecast: groupable ? 0 : 3 }));
@@ -2471,6 +2517,7 @@ async function loadDashboards() {
 
 async function openDashboard(id) {
   hideHomePage();
+  touchRecent(id);   // powers the "Recent" chips on the Home page
   const d = await API.getDashboard(id);
   state.id = d.id;
   state.title = d.title;
@@ -2620,9 +2667,25 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.w-menu-btn') && !e.target.closest('.w-menu'))
     document.querySelectorAll('.w-menu.open').forEach(m => m.classList.remove('open'));
 });
+/* Favorites (starred dashboards) + recently-opened — both per browser. */
+const FAV_KEY = 'nexus_favs', RECENT_KEY = 'nexus_recent';
+function getFavs() { try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); } catch (e) { return new Set(); } }
+function toggleFav(id) {
+  const f = getFavs(); f.has(id) ? f.delete(id) : f.add(id);
+  try { localStorage.setItem(FAV_KEY, JSON.stringify([...f])); } catch (e) {}
+  renderHomePage();
+}
+function getRecent() { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch (e) { return []; } }
+function touchRecent(id) {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify([id, ...getRecent().filter(x => x !== id)].slice(0, 6))); } catch (e) {}
+}
+const STAR_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+
 async function renderHomePage() {
   const grid = $('#hpGrid'), title = $('#hpTitle'), back = $('#hpBack');
   const esc = escapeHtml;
+  const favs = getFavs();
+  const q = ($('#hpSearch')?.value || '').trim().toLowerCase();
   const openDash = id => { hideHomePage(); openDashboard(id); };
   const dashCard = (d, i, showOwner) => {
     const canShare = isAdmin();                    // sharing/permissions is admin-only, matches the backend
@@ -2633,15 +2696,33 @@ async function renderHomePage() {
         ${canShare ? `<button data-action="share" data-id="${d.id}" data-title="${esc(d.title)}" data-token="${d.share_token || ''}">Share…</button>` : ''}
         ${canDelete ? `<button data-action="delete" data-id="${d.id}" data-title="${esc(d.title)}" class="danger">Delete</button>` : ''}
       </div>` : '';
+    const meta = [
+      `${d.widgets ?? 0} graph${(d.widgets ?? 0) === 1 ? '' : 's'}`,
+      (d.views ?? 1) > 1 ? `${d.views} views` : null,
+      d.updated_at ? new Date(d.updated_at).toLocaleDateString() : null
+    ].filter(Boolean).join(' · ');
     return `
     <div class="hp-card" data-open="${d.id}" tabindex="0" role="button" style="animation-delay:${Math.min(i * 45, 400)}ms">
+      <button class="hc-fav ${favs.has(d.id) ? 'on' : ''}" data-fav="${d.id}" title="${favs.has(d.id) ? 'Unfavorite' : 'Favorite'}" aria-label="Toggle favorite" onclick="event.stopPropagation()">${STAR_SVG}</button>
       ${menu}
       <div class="hc-title" title="${esc(d.title)}">${esc(d.title)}</div>
-      <div class="hc-sub">${showOwner ? esc(d.owner_name || d.owner_email || '') + ' · ' : ''}${d.updated_at ? new Date(d.updated_at).toLocaleDateString() : ''}</div>
+      ${showOwner ? `<div class="hc-owner">${esc(d.owner_name || d.owner_email || '')}</div>` : ''}
+      <div class="hc-sub">${esc(meta)}</div>
     </div>`;
   };
+  // Favorites float to the top of any dashboard list.
+  const favSort = arr => [...arr].sort((a, b) => (favs.has(b.id) ? 1 : 0) - (favs.has(a.id) ? 1 : 0));
 
-  if (homeView.level === 'root') {
+  if (q) {
+    // Search overrides the folder structure — matches across everything you can see.
+    title.textContent = 'Search results';
+    back.style.display = 'none';
+    const hits = favSort(dashboardsList.filter(d =>
+      (d.title || '').toLowerCase().includes(q) || (d.owner_name || '').toLowerCase().includes(q)));
+    grid.innerHTML = hits.length
+      ? hits.map((d, i) => dashCard(d, i, true)).join('')
+      : `<div class="hp-empty">No dashboards match “${esc(q)}”.</div>`;
+  } else if (homeView.level === 'root') {
     // Always exactly two entry points, for every account: your own
     // workspace, and whatever has been shared with you. Admins get
     // implicit access to every dashboard (enforced server-side), so
@@ -2651,20 +2732,27 @@ async function renderHomePage() {
     back.style.display = 'none';
     const mine = dashboardsList.filter(d => d.mine);
     const shared = dashboardsList.filter(d => !d.mine);
-    const html = `
+    const nw = arr => arr.reduce((s, d) => s + (d.widgets || 0), 0);
+    // "Recent" chips — jump straight back into what you touched last.
+    const rec = getRecent().map(id => dashboardsList.find(d => d.id === id)).filter(Boolean).slice(0, 5);
+    let html = rec.length ? `
+      <div class="hp-recent"><span class="hr-lbl">Recent</span>
+        ${rec.map(d => `<button class="hr-chip" data-open="${d.id}">${esc(d.title)}</button>`).join('')}
+      </div>` : '';
+    html += `
       <div class="hp-card" data-folder="mine" tabindex="0" role="button" style="animation-delay:0ms">
         <div class="hc-title">My workspace</div>
-        <div class="hc-sub">${mine.length} dashboard${mine.length === 1 ? '' : 's'}</div>
+        <div class="hc-sub">${mine.length} dashboard${mine.length === 1 ? '' : 's'} · ${nw(mine)} graph${nw(mine) === 1 ? '' : 's'}</div>
       </div>
       <div class="hp-card" data-folder="shared" tabindex="0" role="button" style="animation-delay:45ms">
         <div class="hc-title">Shared with me</div>
-        <div class="hc-sub">${shared.length} dashboard${shared.length === 1 ? '' : 's'}</div>
+        <div class="hc-sub">${shared.length} dashboard${shared.length === 1 ? '' : 's'} · ${nw(shared)} graph${nw(shared) === 1 ? '' : 's'}</div>
       </div>`;
     grid.innerHTML = html;
   } else if (homeView.level === 'list') {
     title.textContent = homeView.title;
     back.style.display = '';
-    const ds = homeView.dashboards || [];
+    const ds = favSort(homeView.dashboards || []);
     let html = ds.map((d, i) => dashCard(d, i, homeView.showOwner)).join('');
     if (homeView.canCreate && isEditorAcct())
       html += `<button class="hp-card hc-new" data-newdash="1" style="animation-delay:${Math.min(ds.length * 45, 400)}ms">+ New dashboard</button>`;
@@ -2672,7 +2760,8 @@ async function renderHomePage() {
     grid.innerHTML = html;
   }
 
-  grid.querySelectorAll('.hp-card[data-open]').forEach(card => {
+  grid.querySelectorAll('[data-fav]').forEach(b => b.onclick = e => { e.stopPropagation(); toggleFav(b.dataset.fav); });
+  grid.querySelectorAll('[data-open]').forEach(card => {
     const go = () => openDash(card.dataset.open);
     card.onclick = go;
     card.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
@@ -2860,7 +2949,7 @@ function buildWidget(w, idx) {
     (canEditW && (typeof canEditCurrent === 'undefined' || canEditCurrent)) ? `<button data-act="duplicate">Duplicate</button>` : '',
     canEditW ? `<button data-act="remove" class="danger">Delete</button>` : ''
   ].filter(Boolean).join('');
-  const footHtml = canEditW ? `<div class="w-foot"><button class="w-edit-link" data-act="edit">Edit graph</button></div>` : '';
+  const footHtml = `<div class="w-foot"><span class="w-meta" id="meta-${w.id}"></span>${canEditW ? `<button class="w-edit-link" data-act="edit">Edit graph</button>` : ''}</div>`;
   el.innerHTML = `
     <div class="widget-head" draggable="${canEditW}">
 
@@ -3100,6 +3189,9 @@ function renderWidgetBody(w) {
   const sub = $('#sub-'+w.id);
   if (sub) sub.textContent = widgetSubtitle(w, rows.length);
   evaluateWidgetAlert(w, rows);   // threshold alert rules (red card + notification)
+  // Footer meta — row count + how fresh this widget's snapshot is
+  const metaEl = $('#meta-' + w.id);
+  if (metaEl) metaEl.textContent = `${rows.length.toLocaleString()} rows` + (w.savedAt ? ` · data from ${notifTimeAgo(w.savedAt)}` : '');
 
   if (!activeDs.rows.length || !rows.length) {
     body.innerHTML = emptyStateHTML();
@@ -3918,6 +4010,10 @@ async function renderWorldMap(w, container, rows) {
   try {
     const world = await loadWorldAtlas();
     holder.innerHTML = '';
+    // Hide Antarctica — it has no data by definition and wastes ~20% of the
+    // canvas; every mainstream BI map drops it.
+    const feats = world.features.filter(f => (f.properties.name || '') !== 'Antarctica');
+    const shown = { type: 'FeatureCollection', features: feats };
     // Fixed internal size + viewBox so the SVG scales to the holder via CSS
     // (avoids the "holder has 0px height at render time" blank-map problem).
     const W = 960, H = 500;
@@ -3925,15 +4021,20 @@ async function renderWorldMap(w, container, rows) {
       .attr('viewBox', `0 0 ${W} ${H}`).attr('preserveAspectRatio', 'xMidYMid meet')
       .style('width', '100%').style('height', '100%').style('display', 'block');
     const projFn = d3.geoNaturalEarth1 || d3.geoEqualEarth || d3.geoMercator;   // fallback if not in the d3 build
-    const projection = projFn().fitSize([W, H], world);
+    const projection = projFn().fitSize([W, H], shown);
     const path = d3.geoPath(projection);
     // Shift the interpolator so even the MIN value is a clearly-visible blue
     // (plain interpolateBlues(0) is almost white → low-value countries vanish).
     const scale = d3.scaleSequential(t => d3.interpolateBlues(0.28 + 0.72 * t)).domain([min, max]);
-    const neutral = (getComputedStyle(document.body).getPropertyValue('--panel-2').trim()) || '#e5e7eb';
+    // No-data landmass must stay clearly visible in BOTH themes — the old
+    // var(--panel-2) fill was near-identical to the card background, which
+    // made most of the world disappear.
+    const darkTheme = document.documentElement.getAttribute('data-theme') === 'dark';
+    const neutral = darkTheme ? 'rgba(255,255,255,0.10)' : '#e2e6f3';
+    const strokeCol = darkTheme ? 'rgba(255,255,255,0.22)' : '#b7bdd6';
     const tip = d3.select(holder).append('div').attr('class', 'map-tooltip').style('display', 'none');
     const q = ($('#globalSearch') && $('#globalSearch').value ? $('#globalSearch').value : '').trim().toLowerCase();
-    svg.append('g').selectAll('path').data(world.features).join('path')
+    svg.append('g').selectAll('path').data(feats).join('path')
       .attr('d', path)
       .attr('class', f => countryToCanonical(f.properties.name) === mapSelection ? 'mp-selected' : null)
       .style('cursor', 'pointer')
@@ -3944,7 +4045,7 @@ async function renderWorldMap(w, container, rows) {
         if (w.thresholds && w.thresholds.length) c = colorForValue(byName[nm], w.thresholds, null);   // thresholds override
         return c || scale(byName[nm]);
       })
-      .attr('stroke', gridColor() || '#ffffff').attr('stroke-width', 0.4)
+      .attr('stroke', strokeCol).attr('stroke-width', 0.5)
       .attr('opacity', f => (!q || (f.properties.name || '').toLowerCase().includes(q)) ? 1 : 0.2)   // global search highlight
       .on('mousemove', function (ev, f) {
         const nm = (f.properties.name || '').toLowerCase(), has = nm in byName;
@@ -5397,7 +5498,7 @@ function saveBuilder() {
   const d = builderDraft;
   if (!d.title || !d.title.trim()) d.title = 'Untitled graph';
   // Attach the builder's own dataset to the widget so it renders independently
-  if (builderDataset) d.savedDataset = builderDataset;
+  if (builderDataset) { d.savedDataset = builderDataset; d.savedAt = Date.now(); }   // freshness stamp for the card footer
   d.connectionId = builderConnId || null;   // remember which connection fed this widget
   d.source = builderSource || d.source || null;   // remember HOW the data was picked (browse/query/manual)
   // Also push to global dataset if there's no global data yet
@@ -6155,6 +6256,8 @@ function init() {
   $('#kioskBtn').onclick = enterKiosk;
   $('#insightsBtn').onclick = openInsights;
   $('#insightsClose').onclick = closeInsights;
+  let _hpSearchT;
+  $('#hpSearch').oninput = () => { clearTimeout(_hpSearchT); _hpSearchT = setTimeout(renderHomePage, 150); };
   $('#insightsOverlay').addEventListener('click', e => { if (e.target.id === 'insightsOverlay') closeInsights(); });
   // Command palette (Ctrl/Cmd+K)
   document.addEventListener('keydown', e => {
@@ -6219,8 +6322,19 @@ function init() {
   window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
 
   // filters
+  const syncQrChips = () => {
+    const v = $('#timeRange').value;
+    $$('.qr-chip').forEach(c => c.classList.toggle('on', c.dataset.qr === v));
+  };
+  $$('.qr-chip').forEach(c => c.onclick = () => {
+    $('#timeRange').value = c.dataset.qr;
+    $('#customRangeField').style.display = 'none';
+    syncQrChips(); renderGrid();
+  });
+  syncQrChips();
   $('#timeRange').onchange = ()=>{
     $('#customRangeField').style.display = $('#timeRange').value === 'custom' ? '' : 'none';
+    syncQrChips();
     renderGrid();
   };
   $('#rangeFrom').onchange = ()=>{ renderGrid(); };
