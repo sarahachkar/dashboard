@@ -322,6 +322,21 @@ body[data-kiosk="1"] .kiosk-title { display: flex; }
 .kiosk-title .kt-name { font-size: 22px; font-weight: 800; color: var(--text); }
 .kiosk-title .kt-view { font-size: 14px; color: var(--text-dim); font-weight: 600; }
 
+/* ===== PDF export — print-friendly view (File → Print / Export PDF) ===== */
+@media print {
+  .toolbar, .view-tabs, .filterbar, #mapFilterBar, .w-controls, .w-foot, .resize-handle,
+  .add-card-fab, .kiosk-title, .toast, .notif-menu, .modal-overlay, .cmdk-overlay, .maximize-backdrop { display: none !important; }
+  body { padding-top: 0 !important; background: #fff !important; }
+  .main { padding: 8px !important; }
+  .grid { display: block !important; }
+  .widget {
+    break-inside: avoid; page-break-inside: avoid; margin: 0 0 14px;
+    box-shadow: none !important; border: 1px solid #ccc !important; background: #fff !important;
+    transform: none !important;
+  }
+  #summaryStrip { break-inside: avoid; }
+}
+
 /* ===== Command palette (Ctrl/Cmd+K) ===== */
 .cmdk-overlay { position: fixed; inset: 0; background: rgba(10,13,26,0.55); backdrop-filter: blur(3px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 14vh; }
 .cmdk-overlay.open { display: flex; }
@@ -336,6 +351,12 @@ body[data-kiosk="1"] .kiosk-title { display: flex; }
 .cmdk-item.active, .cmdk-item:hover { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .cmdk-empty { padding: 22px; text-align: center; color: var(--text-dim); font-size: 13px; }
 .cmdk-foot { display: flex; gap: 16px; justify-content: flex-end; padding: 8px 14px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 11px; }
+/* ===== Smart Insights modal ===== */
+.insights-list { display: flex; flex-direction: column; gap: 10px; max-height: 60vh; overflow-y: auto; padding: 4px 2px; }
+.insight-card { border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px; background: var(--panel); }
+.insight-card .ic-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.insight-card .ic-detail { font-size: 12.5px; color: var(--text-dim); margin-bottom: 8px; }
+.insight-card .btn { padding: 5px 10px; }
 .widget.cmdk-flash { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow .25s; }
 
 /* ===== Tabs (dashboard views) ===== */
@@ -540,6 +561,11 @@ select.input { cursor: pointer; }
 .w-max-btn .i-collapse { display: none; }
 .maximized .w-max-btn .i-expand { display: none; }
 .maximized .w-max-btn .i-collapse { display: inline-grid; }
+/* Alert rule breached — red card + pulsing dot before the subtitle */
+.widget.alerting { border-color: var(--danger) !important; }
+.alert-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); margin-right: 5px; animation: alertPulse 1.6s ease-out infinite; }
+@keyframes alertPulse { 0% { box-shadow: 0 0 0 0 rgba(255,94,122,.45); } 70% { box-shadow: 0 0 0 6px rgba(255,94,122,0); } 100% { box-shadow: 0 0 0 0 rgba(255,94,122,0); } }
+@media (prefers-reduced-motion: reduce) { .alert-dot { animation: none; } }
 
 /* ===== Header (Issue 3) ===== */
 .widget-head {
@@ -1057,6 +1083,7 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
         <option value="300">Auto: 5m</option>
       </select>
       <span class="badge" id="lastUpdated" title="Last refreshed" style="display:none"></span>
+      <button class="btn ghost sm" id="insightsBtn" title="Smart insights — automatic analysis of your data"><span class="btn-icon">◆</span><span class="btn-label">Insights</span></button>
       <button class="btn ghost sm" id="kioskBtn" title="Presentation / TV mode (fullscreen, auto-cycles views)"><span class="btn-icon">▶</span><span class="btn-label">Present</span></button>
       <button class="btn ghost sm" id="themeBtn" title="Toggle theme"><span class="btn-icon">◑</span><span class="btn-label">Theme</span></button>
     </div>
@@ -1376,6 +1403,20 @@ table.dt tr:hover td { background: var(--panel-2); color: var(--text); }
   </div>
 </div>
 
+<!-- ===== Smart Insights ===== -->
+<div class="modal-overlay" id="insightsOverlay">
+  <div class="builder" role="dialog" aria-modal="true" aria-label="Smart insights" style="width:min(620px,96vw)">
+    <div class="builder-head">
+      <div>
+        <h2 style="margin:0">Smart insights</h2>
+        <div class="bhint" style="margin:2px 0 0">Automatic analysis of the loaded dataset — trends, movers, outliers, correlations.</div>
+      </div>
+      <button class="icon-btn" id="insightsClose" title="Close">Close</button>
+    </div>
+    <div id="insightsList" class="insights-list"></div>
+  </div>
+</div>
+
 <!-- ===== Command palette (Ctrl/Cmd+K) ===== -->
 <div class="cmdk-overlay" id="cmdkOverlay">
   <div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
@@ -1438,6 +1479,7 @@ const API = {
   logout() { return this._fetch('/api/auth/logout', { method: 'POST' }); },
   notifications() { return this._fetch('/api/notifications'); },
   markNotificationsRead() { return this._fetch('/api/notifications/read', { method: 'POST' }); },
+  pushNotification(message, link) { return this._fetch('/api/notifications', { method: 'POST', body: JSON.stringify({ message, link }) }); },
   adminUsers() { return this._fetch('/api/admin/users'); },
   adminSetPermission(id, permission) { return this._fetch('/api/admin/users/' + id + '/permission', { method: 'PATCH', body: JSON.stringify({ permission }) }); },
   adminWidgets() { return this._fetch('/api/admin/widgets'); },
@@ -2024,6 +2066,8 @@ function cmdkSources() {
   act('Go home', 'dashboard folders', () => showHomePage());
   act('Toggle theme', 'light / dark', () => $('#themeBtn')?.click());
   act('Presentation mode', 'fullscreen, auto-cycles views', () => enterKiosk());
+  act('Smart insights', 'automatic analysis of your data', () => openInsights());
+  act('Export PDF', 'print-friendly view of this dashboard', () => window.print());
   act('Refresh charts', '', () => { renderGrid(); stampUpdated(); });
   if (isAdmin() && state.id) act('Share this dashboard', state.title || '', () => openShare());
   if (isEditorAcct()) act('New dashboard', '', () => { hideHomePage(); createDashboard(); });
@@ -2060,6 +2104,10 @@ function renderCmdkList(q) {
   }).filter(x => x.s > 0);
   scored.sort((a, b) => b.s - a.s);
   cmdkResults = scored.slice(0, 30).map(x => x.it);
+  // "Ask your data" — any free-text query can become a graph (editors only)
+  if (q.length >= 4 && isEditorAcct() && canEditCurrent) {
+    cmdkResults.push({ kind: 'Ask', label: `Create graph: “${q}”`, hint: 'natural language', run: () => askYourData(q) });
+  }
   cmdkIndex = 0;
   const list = $('#cmdkList');
   if (!cmdkResults.length) { list.innerHTML = '<div class="cmdk-empty">No matches.</div>'; return; }
@@ -2081,6 +2129,61 @@ function runCmdk(i) {
   closeCmdk();
   it.run();
 }
+/* =====================================================================
+   "Ask your data" — natural-language graph creation from the Ctrl+K
+   palette. Parses queries like "average revenue by region as pie" or
+   "units over time": aggregation words → agg, column-name mentions →
+   X/Y, time words → the date column, chart-type words → type.
+   ===================================================================== */
+function parseAskQuery(q, snap) {
+  const { dateCol, cats, nums } = _classifyDs(snap);
+  const ql = ' ' + q.toLowerCase() + ' ';
+  const TYPE_WORDS = [['pie','pie'],['donut','donut'],['doughnut','donut'],['spline','spline'],['line','line'],
+    ['area','area'],['column','column'],['bar','bar'],['scatter','scatter'],['heatmap','heatmap'],['table','table'],
+    ['kpi','kpi'],['radar','radar'],['funnel','funnel'],['treemap','treemap'],['pareto','pareto'],['box','boxplot'],
+    ['histogram','histogram'],['map','worldmap'],['gauge','gauge']];
+  let type = null;
+  for (const [wd, t] of TYPE_WORDS) if (ql.includes(' ' + wd)) { type = t; break; }
+  let agg = 'sum';
+  if (/\b(average|avg|mean)\b/.test(ql)) agg = 'avg';
+  else if (/\bcount\b/.test(ql)) agg = 'count';
+  else if (/\bmax(imum)?\b/.test(ql)) agg = 'max';
+  else if (/\bmin(imum)?\b/.test(ql)) agg = 'min';
+  const mentioned = (pool) => {
+    let best = null;
+    for (const c of pool) if (ql.includes(c.toLowerCase()) && (!best || c.length > best.length)) best = c;
+    return best;
+  };
+  const y = mentioned(nums) || nums[0];
+  const timeish = /\b(time|trend|month|week|day|date|daily|weekly|monthly)\b/.test(ql);
+  let x = null;
+  const byM = q.toLowerCase().match(/\b(?:by|per)\s+([\w &]+)/);
+  if (byM) x = [...cats, ...(dateCol ? [dateCol] : [])].find(c => byM[1].trim().startsWith(c.toLowerCase())) || null;
+  if (!x && timeish && dateCol) x = dateCol;
+  if (!x) x = mentioned(cats);
+  if (!x) x = cats[0] || dateCol;
+  if (!x || !y) return null;
+  if (!type) type = (x === dateCol) ? 'spline' : 'bar';
+  const spec = { type, x, y, agg, title: q };
+  if (type === 'heatmap') spec.group = cats.find(c => c !== x) || cats[0] || '';
+  return spec;
+}
+function askYourData(q) {
+  if (!requireEdit()) return;
+  const src = (dataset && dataset.rows.length) ? dataset : sampleData();
+  const snap = { columns: [...src.columns], rows: src.rows.map(r => ({ ...r })) };
+  const spec = parseAskQuery(q, snap);
+  if (!spec) return toast('Could not understand that — try “revenue by category as pie”', true);
+  const w = { id: uid(), group: '', size: 'medium', theme: 'mixed', savedDataset: snap, ...spec };
+  widgets().push(w);
+  hideHomePage(); renderGrid(); saveState();
+  toast(`Created a ${spec.type} graph from “${q}”`);
+  setTimeout(() => {
+    const el = document.querySelector(`.widget[data-id="${w.id}"]`);
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('cmdk-flash'); setTimeout(() => el.classList.remove('cmdk-flash'), 1500); }
+  }, 120);
+}
+
 function openCmdk() {
   const ov = $('#cmdkOverlay'); if (!ov) return;
   ov.classList.add('open');
@@ -2089,6 +2192,168 @@ function openCmdk() {
   inp.focus();
 }
 function closeCmdk() { $('#cmdkOverlay')?.classList.remove('open'); }
+
+/* =====================================================================
+   Smart Insights (Qlik Insight-Advisor-style) — scans the dataset and
+   surfaces automatic findings: overall trend, top contributor, revenue
+   concentration, biggest mover, statistical outliers and correlations.
+   Each finding that maps to a chart offers one-click "Add graph".
+   ===================================================================== */
+function _classifyDs(src) {
+  const prev = dataset; dataset = src;
+  const dateCol = dateCols()[0] || null;
+  const cats = catCols().filter(c => c !== dateCol);
+  const nums = numericCols();
+  dataset = prev;
+  return { dateCol, cats, nums };
+}
+function _fmtIns(v) {
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (a >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return String(Math.round(v * 100) / 100);
+}
+function generateInsights(src) {
+  const out = [];
+  const { dateCol, cats, nums } = _classifyDs(src);
+  const rows = src.rows;
+  const m0 = nums[0], cat0 = cats[0];
+  const sumBy = (key, val) => {
+    const m = new Map();
+    rows.forEach(r => m.set(String(r[key]), (m.get(String(r[key])) || 0) + (+r[val] || 0)));
+    return [...m.entries()];
+  };
+
+  // 1) Overall trend of the first measure over time (linear fit)
+  if (dateCol && m0) {
+    const series = sumBy(dateCol, m0).sort((a, b) => a[0] > b[0] ? 1 : -1).map(e => e[1]);
+    if (series.length >= 3) {
+      const n = series.length;
+      const sumX = n * (n - 1) / 2, sumY = series.reduce((a, b) => a + b, 0);
+      const sumXY = series.reduce((a, y, i) => a + i * y, 0);
+      const sumX2 = series.reduce((a, _, i) => a + i * i, 0);
+      const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX || 1);
+      const a0 = (sumY - slope * sumX) / n;
+      const start = a0, end = a0 + slope * (n - 1);
+      if (Math.abs(start) > 1e-9) {
+        const pct = Math.round(((end - start) / Math.abs(start)) * 100);
+        if (Math.abs(pct) >= 3) out.push({
+          title: `${m0} is trending ${pct >= 0 ? 'up' : 'down'} ${Math.abs(pct)}%`,
+          detail: `Linear fit across ${n} periods of ${dateCol}: ${_fmtIns(start)} → ${_fmtIns(end)}.`,
+          spec: { type: 'spline', title: `${m0} over time`, x: dateCol, y: m0, agg: 'sum', trend: 'linear', forecast: 3 }
+        });
+      }
+    }
+  }
+
+  // 2) Top contributor + concentration on the first category
+  if (cat0 && m0) {
+    const agg = sumBy(cat0, m0).sort((a, b) => b[1] - a[1]);
+    const total = agg.reduce((s, e) => s + e[1], 0);
+    if (agg.length >= 2 && total > 0) {
+      const [name, v] = agg[0];
+      out.push({
+        title: `${name} leads ${cat0} with ${Math.round(v / total * 100)}% of ${m0}`,
+        detail: `${_fmtIns(v)} of ${_fmtIns(total)} total across ${agg.length} ${cat0} values.`,
+        spec: { type: 'donut', title: `${m0} share by ${cat0}`, x: cat0, y: m0, agg: 'sum' }
+      });
+      if (agg.length >= 5) {
+        const top3 = agg.slice(0, 3).reduce((s, e) => s + e[1], 0);
+        const share = Math.round(top3 / total * 100);
+        if (share >= 60) out.push({
+          title: `Top 3 ${cat0} values hold ${share}% of ${m0}`,
+          detail: `High concentration — the 80/20 rule applies. A Pareto view shows where the weight is.`,
+          spec: { type: 'pareto', title: `${m0} Pareto by ${cat0}`, x: cat0, y: m0, agg: 'sum' }
+        });
+      }
+    }
+  }
+
+  // 3) Biggest mover: category with the largest % change, last vs previous period
+  if (dateCol && cat0 && m0) {
+    const periods = [...new Set(rows.map(r => String(r[dateCol])))].sort();
+    if (periods.length >= 2) {
+      const last = periods[periods.length - 1], prevP = periods[periods.length - 2];
+      let best = null;
+      for (const [c] of sumBy(cat0, m0)) {
+        const lv = rows.filter(r => String(r[cat0]) === c && String(r[dateCol]) === last).reduce((s, r) => s + (+r[m0] || 0), 0);
+        const pv = rows.filter(r => String(r[cat0]) === c && String(r[dateCol]) === prevP).reduce((s, r) => s + (+r[m0] || 0), 0);
+        if (pv > 0) {
+          const chg = (lv - pv) / pv * 100;
+          if (!best || Math.abs(chg) > Math.abs(best.chg)) best = { c, chg, lv, pv };
+        }
+      }
+      if (best && Math.abs(best.chg) >= 10) out.push({
+        title: `${best.c} ${best.chg >= 0 ? 'jumped' : 'dropped'} ${Math.abs(Math.round(best.chg))}% in the last period`,
+        detail: `${_fmtIns(best.pv)} → ${_fmtIns(best.lv)} (${prevP} → ${last}).`,
+        spec: { type: 'line', title: `${m0} by ${cat0} over time`, x: dateCol, y: m0, group: cat0, agg: 'sum' }
+      });
+    }
+  }
+
+  // 4) Statistical outliers in the first measure (z-score > 2.5)
+  if (m0) {
+    const vals = rows.map(r => +r[m0]).filter(v => !isNaN(v));
+    if (vals.length >= 8) {
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) || 1;
+      const outliers = vals.filter(v => Math.abs((v - mean) / sd) > 2.5);
+      if (outliers.length) out.push({
+        title: `${outliers.length} outlier value${outliers.length === 1 ? '' : 's'} in ${m0}`,
+        detail: `Beyond 2.5σ from the mean (${_fmtIns(mean)} ± ${_fmtIns(sd)}). Extremes: ${_fmtIns(Math.min(...outliers))} / ${_fmtIns(Math.max(...outliers))}.`,
+        spec: cat0 ? { type: 'boxplot', title: `${m0} distribution by ${cat0}`, x: cat0, y: m0, agg: 'none' } : null
+      });
+    }
+  }
+
+  // 5) Correlation between the first two measures (Pearson)
+  if (nums.length >= 2) {
+    const [a, b] = nums;
+    const pairs = rows.map(r => [+r[a], +r[b]]).filter(p => !isNaN(p[0]) && !isNaN(p[1]));
+    if (pairs.length >= 8) {
+      const n = pairs.length;
+      const ma = pairs.reduce((s, p) => s + p[0], 0) / n, mb = pairs.reduce((s, p) => s + p[1], 0) / n;
+      let cov = 0, va = 0, vb = 0;
+      pairs.forEach(p => { cov += (p[0] - ma) * (p[1] - mb); va += (p[0] - ma) ** 2; vb += (p[1] - mb) ** 2; });
+      const r = cov / (Math.sqrt(va * vb) || 1);
+      if (Math.abs(r) >= 0.5) out.push({
+        title: `${a} and ${b} are ${r > 0 ? 'positively' : 'negatively'} correlated (r = ${r.toFixed(2)})`,
+        detail: `${Math.abs(r) >= 0.8 ? 'Strong' : 'Moderate'} ${r > 0 ? 'positive' : 'negative'} relationship across ${n} rows.`,
+        spec: { type: 'scatter', title: `${b} vs ${a}`, x: a, y: b, agg: 'none' }
+      });
+    }
+  }
+
+  return out;
+}
+
+function openInsights() {
+  const src = (dataset && dataset.rows.length) ? dataset : sampleData();
+  const snap = { columns: [...src.columns], rows: src.rows.map(r => ({ ...r })) };
+  const insights = generateInsights(snap);
+  const list = $('#insightsList');
+  const canAdd = isEditorAcct() && canEditCurrent;
+  list.innerHTML = insights.length ? insights.map((ins, i) => `
+    <div class="insight-card">
+      <div class="ic-title">${escapeHtml(ins.title)}</div>
+      <div class="ic-detail">${escapeHtml(ins.detail)}</div>
+      ${ins.spec && canAdd ? `<button class="btn sm" data-ins="${i}">Add as graph</button>` : ''}
+    </div>`).join('') : '<div class="bhint">No notable patterns found in this dataset.</div>';
+  list.querySelectorAll('[data-ins]').forEach(btn => btn.onclick = () => {
+    const ins = insights[+btn.dataset.ins];
+    const w = { id: uid(), group: '', size: 'medium', theme: 'mixed', savedDataset: snap, ...ins.spec };
+    widgets().push(w);
+    closeInsights(); hideHomePage();
+    renderGrid(); saveState();
+    toast('Graph added from insight');
+    setTimeout(() => {
+      const el = document.querySelector(`.widget[data-id="${w.id}"]`);
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('cmdk-flash'); setTimeout(() => el.classList.remove('cmdk-flash'), 1500); }
+    }, 120);
+  });
+  $('#insightsOverlay').classList.add('open');
+}
+function closeInsights() { $('#insightsOverlay').classList.remove('open'); }
 
 /* =====================================================================
    Auto-build (dashboard template) — classifies the loaded dataset's
@@ -2817,6 +3082,7 @@ function renderWidgetBody(w) {
   }
   const sub = $('#sub-'+w.id);
   if (sub) sub.textContent = widgetSubtitle(w, rows.length);
+  evaluateWidgetAlert(w, rows);   // threshold alert rules (red card + notification)
 
   if (!activeDs.rows.length || !rows.length) {
     body.innerHTML = emptyStateHTML();
@@ -3140,6 +3406,38 @@ function applyTrendline(cfg, w, grouped, isH) {
     for (let i = 1; i <= f; i++) cfg.data.labels.push('+' + i);   // forecast periods extend the axis
   }
   cfg.data.datasets.push(dash);
+}
+
+/* =====================================================================
+   Alert rules (Grafana-style) — each graph can watch its own aggregated
+   value ("alert me when it goes below/above X"). Evaluated on every
+   render (so auto-refresh keeps them live). A breach turns the card red
+   and fires ONE in-app notification per state change (no re-fire spam).
+   ===================================================================== */
+const _alertState = {};   // widget id → currently breached?
+function widgetAlertValue(w, rows) {
+  const vals = rows.map(r => +r[w.y]).filter(v => !isNaN(v));
+  if (!vals.length) return null;
+  return aggValues(vals, (!w.agg || w.agg === 'none') ? 'sum' : w.agg);
+}
+function evaluateWidgetAlert(w, rows) {
+  const card = document.querySelector(`.widget[data-id="${w.id}"]`);
+  if (!card) return;
+  const active = (w.alertOp === 'lt' || w.alertOp === 'gt') && w.alertValue !== null && w.alertValue !== undefined && w.alertValue !== '';
+  if (!active) { card.classList.remove('alerting'); delete _alertState[w.id]; return; }
+  const cur = widgetAlertValue(w, rows);
+  const breached = cur !== null && (w.alertOp === 'lt' ? cur < +w.alertValue : cur > +w.alertValue);
+  card.classList.toggle('alerting', breached);
+  const sub = $('#sub-' + w.id);
+  if (sub && breached) sub.innerHTML = '<span class="alert-dot" aria-hidden="true"></span>' + escapeHtml(sub.textContent);
+  const was = _alertState[w.id] || false;
+  _alertState[w.id] = breached;
+  if (breached && !was) {
+    const dir = w.alertOp === 'lt' ? 'below' : 'above';
+    const msg = `Alert: “${w.title || 'Untitled graph'}” is ${dir} ${w.alertValue} (current: ${round(cur)})`;
+    toast(msg, true);
+    API.pushNotification(msg, state.id || null).then(loadNotifications).catch(() => {});
+  }
 }
 
 // Average-of-first-series and/or fixed target reference lines.
@@ -4703,6 +5001,19 @@ function renderBuilderForm() {
         </div>
       </div>
       <div class="bhint">Trendline &amp; forecast fit the first series (single-series charts). Reference lines are drawn on the value axis.</div>
+      <div class="brow">
+        <div class="bfield"><label>Alert me when value is</label>
+          <select class="binput" id="bAlertOp">
+            <option value="">No alert</option>
+            <option value="lt" ${d.alertOp === 'lt' ? 'selected' : ''}>Below…</option>
+            <option value="gt" ${d.alertOp === 'gt' ? 'selected' : ''}>Above…</option>
+          </select>
+        </div>
+        <div class="bfield"><label>Alert threshold</label>
+          <input class="binput" id="bAlertValue" type="number" value="${d.alertValue ?? ''}" placeholder="e.g. 1000" ${d.alertOp ? '' : 'disabled'}>
+        </div>
+      </div>
+      <div class="bhint">When the graph's aggregated value crosses the threshold, the card turns red and you get a notification (checked on every refresh).</div>
     </div>` : ''}
     ${d.type !== 'worldmap' ? `
     <div class="bfield">
@@ -4743,6 +5054,11 @@ function renderBuilderForm() {
     $('#bForecast').onchange = () => { d.forecast = Math.max(0, Math.min(24, +$('#bForecast').value || 0)); builderPreview(); };
     $('#bShowAvg').onchange = () => { d.showAvg = !!$('#bShowAvg').value; builderPreview(); };
     $('#bTarget').onchange = () => { const v = $('#bTarget').value; d.target = v === '' ? null : +v; builderPreview(); };
+    $('#bAlertOp').onchange = () => {
+      d.alertOp = $('#bAlertOp').value || '';
+      const av = $('#bAlertValue'); if (av) av.disabled = !d.alertOp;
+    };
+    $('#bAlertValue').onchange = () => { const v = $('#bAlertValue').value; d.alertValue = v === '' ? null : +v; };
   }
   if (THRESHOLD_TYPES.includes(d.type)) {
     renderThresholdRows();
@@ -5614,6 +5930,9 @@ function init() {
   $('#builderOverlay').addEventListener('click', e=>{ if (e.target.id==='builderOverlay') closeBuilder(); });
   $('#refreshBtn').onclick = ()=>{ renderGrid(); stampUpdated(); toast('Refreshed'); };
   $('#kioskBtn').onclick = enterKiosk;
+  $('#insightsBtn').onclick = openInsights;
+  $('#insightsClose').onclick = closeInsights;
+  $('#insightsOverlay').addEventListener('click', e => { if (e.target.id === 'insightsOverlay') closeInsights(); });
   // Command palette (Ctrl/Cmd+K)
   document.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -5703,6 +6022,7 @@ function init() {
   document.addEventListener('keydown', e=>{
     if (e.key!=='Escape') return;
     if ($('#cmdkOverlay')?.classList.contains('open')) closeCmdk();
+    else if ($('#insightsOverlay')?.classList.contains('open')) closeInsights();
     else if ($('#tableOverlay').classList.contains('open')) closeTableModal();
     else if ($('#builderOverlay').classList.contains('open')) closeBuilder();
     else if (document.body.dataset.kiosk === '1') exitKiosk();

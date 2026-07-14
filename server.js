@@ -550,6 +550,13 @@ const server = http.createServer(async (req, res) => {
       db.prepare('UPDATE notifications SET read=1 WHERE user_id=?').run(authUser.id);
       return sendJson(res, 200, { ok: true });
     }
+    // Self-notification — used by client-side alert rules ("value dropped below X")
+    if (p === '/api/notifications' && m === 'POST') {
+      const { message, link } = await readBody(req);
+      if (!message) return sendJson(res, 400, { error: 'message required' });
+      notify(authUser.id, String(message).slice(0, 300), link ? String(link).slice(0, 100) : null);
+      return sendJson(res, 200, { ok: true });
+    }
 
     /* ---------------- User directory (for sharing) ---------------- */
     if (p === '/api/users' && m === 'GET') {
