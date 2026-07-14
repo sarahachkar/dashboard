@@ -287,8 +287,10 @@ body[data-readonly="true"] #viewTabs > button.btn,
 body[data-readonly="true"] .view-tab .x,
 body[data-readonly="true"] .empty-canvas .btn { display: none !important; }
 /* Per-widget read-only: hide edit + delete + Edit-graph, keep export/expand */
-.widget.w-readonly .icon-btn[data-act="edit"],
-.widget.w-readonly .icon-btn[data-act="remove"],
+.widget.w-readonly [data-act="edit"],
+.widget.w-readonly [data-act="remove"],
+.widget.w-readonly [data-act="size"],
+.widget.w-readonly [data-act="duplicate"],
 .widget.w-readonly .w-foot { display: none !important; }
 /* Public share-link view is fully read-only on every widget */
 body[data-viewmode="link"] .w-controls,
@@ -556,6 +558,23 @@ select.input { cursor: pointer; }
   width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
   font-size: 13px; transition: all .15s;
 }
+/* Per-graph ⋮ options menu (replaces the old icon row next to the title) */
+.w-controls { position: relative; }
+.w-menu-btn { font-size: 16px; font-weight: 700; }
+.w-menu {
+  position: absolute; top: 32px; right: 0; min-width: 150px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 12px 28px rgba(16,24,40,0.18); padding: 6px; display: none; flex-direction: column;
+  gap: 2px; z-index: 6;
+}
+.w-menu.open { display: flex; }
+/* the card clips its content for rounded corners — release it while the menu is open */
+.widget:has(.w-menu.open) { overflow: visible; }
+.w-menu button {
+  all: unset; box-sizing: border-box; width: 100%; padding: 8px 10px; border-radius: 7px; font-size: 13px;
+  font-family: inherit; color: var(--text); cursor: pointer; transition: background .12s ease;
+}
+.w-menu button:hover { background: var(--panel-2, rgba(124,92,252,.1)); }
+.w-menu button.danger { color: var(--danger, #ff5e7a); }
 .icon-btn:hover { background: rgba(124,92,252,0.15); color: var(--accent); border-color: rgba(124,92,252,0.3); }
 .icon-btn.danger:hover { color: var(--danger); background: rgba(255,94,122,0.12); border-color: rgba(255,94,122,0.3); }
 
@@ -2307,8 +2326,10 @@ async function showHomePage() {
 function hideHomePage() { const hp = $('#homePage'); if (hp) hp.style.display = 'none'; }
 // Close any open card ⋮ menu when clicking elsewhere on the page.
 document.addEventListener('click', e => {
-  if (e.target.closest('.hc-menu-btn') || e.target.closest('.hc-menu')) return;
-  document.querySelectorAll('.hc-menu.open').forEach(m => m.classList.remove('open'));
+  if (!e.target.closest('.hc-menu-btn') && !e.target.closest('.hc-menu'))
+    document.querySelectorAll('.hc-menu.open').forEach(m => m.classList.remove('open'));
+  if (!e.target.closest('.w-menu-btn') && !e.target.closest('.w-menu'))
+    document.querySelectorAll('.w-menu.open').forEach(m => m.classList.remove('open'));
 });
 async function renderHomePage() {
   const grid = $('#hpGrid'), title = $('#hpTitle'), back = $('#hpBack');
@@ -2541,12 +2562,16 @@ function buildWidget(w, idx) {
 
   // Editing controls are only emitted into the DOM for editable widgets.
   const canEditW = widgetEditable(w) && viewMode !== 'link';
-  const editControls = canEditW
-    ? `<button class="icon-btn" title="Edit graph" data-act="edit">${ICON_SVG.edit}</button>`
-    : '';
-  const removeControl = canEditW
-    ? `<button class="icon-btn danger" title="Delete graph" data-act="remove">${ICON_SVG.trash}</button>`
-    : '';
+  // All per-graph actions live in one ⋮ menu — no icon row next to the title.
+  const menuItems = [
+    canEditW ? `<button data-act="edit">Edit graph</button>` : '',
+    canEditW ? `<button data-act="size">Size: ${w.size || 'medium'}</button>` : '',
+    `<button data-act="export">Export PNG</button>`,
+    `<button data-act="csv">Export CSV</button>`,
+    (canEditW && (typeof canEditCurrent === 'undefined' || canEditCurrent)) ? `<button data-act="duplicate">Duplicate</button>` : '',
+    `<button data-act="maximize">Expand</button>`,
+    canEditW ? `<button data-act="remove" class="danger">Delete</button>` : ''
+  ].filter(Boolean).join('');
   const footHtml = canEditW ? `<div class="w-foot"><button class="w-edit-link" data-act="edit">Edit graph</button></div>` : '';
   el.innerHTML = `
     <div class="widget-head" draggable="${canEditW}">
@@ -2557,13 +2582,8 @@ function buildWidget(w, idx) {
         <div class="w-sub" id="sub-${w.id}"></div>
       </div>
       <div class="w-controls">
-        ${editControls}
-        ${canEditW ? `<button class="icon-btn" title="Cycle size (small / medium / large)" data-act="size">${(w.size||'medium')[0].toUpperCase()}</button>` : ''}
-        <button class="icon-btn" title="Export PNG" data-act="export">${ICON_SVG.download}</button>
-        <button class="icon-btn" title="Export CSV (data)" data-act="csv">⤓</button>
-        ${canEditW && (typeof canEditCurrent === 'undefined' || canEditCurrent) ? `<button class="icon-btn" title="Duplicate graph" data-act="duplicate">⧉</button>` : ''}
-        <button class="icon-btn" title="Expand" data-act="maximize">⛶︎</button>
-        ${removeControl}
+        <button class="icon-btn w-menu-btn" title="Graph options" aria-haspopup="true">⋮</button>
+        <div class="w-menu">${menuItems}</div>
       </div>
     </div>
     <div class="w-body" id="body-${w.id}"></div>
@@ -2575,9 +2595,19 @@ function buildWidget(w, idx) {
   const titleInput = el.querySelector('input.w-title');
   if (titleInput) titleInput.addEventListener('change', ()=>{ w.title=titleInput.value; saveState(); });
 
-  // action buttons
+  // ⋮ options menu (open/close)
+  const menuBtn = el.querySelector('.w-menu-btn');
+  if (menuBtn) menuBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    const menu = el.querySelector('.w-menu');
+    document.querySelectorAll('.w-menu.open').forEach(m => { if (m !== menu) m.classList.remove('open'); });
+    menu.classList.toggle('open');
+  });
+
+  // action buttons (menu items carry data-act)
   el.querySelectorAll('[data-act]').forEach(b=>{
     b.addEventListener('click', ()=>{
+      document.querySelectorAll('.w-menu.open').forEach(m => m.classList.remove('open'));
       const act = b.dataset.act;
       if (act==='remove') removeWidget(w.id);
       else if (act==='export') exportWidget(w);
@@ -2634,7 +2664,7 @@ function toggleMaximize(w, el, btn) {
   if (!bd) { bd = document.createElement('div'); bd.className = 'maximize-backdrop'; bd.onclick = restoreMaximize; document.body.appendChild(bd); }
   requestAnimationFrame(()=>bd.classList.add('show'));
   el.classList.add('maximized');
-  btn.textContent = '✕'; btn.title = 'Minimize';   // ✕ closes the fullscreen view (does NOT delete)
+  btn.textContent = 'Exit fullscreen'; btn.title = 'Exit fullscreen';   // closes the fullscreen view (does NOT delete)
   setTimeout(()=>{ if (charts[w.id]) { try{charts[w.id].resize()}catch(e){} } }, 200);
 }
 function restoreMaximize() {
@@ -2643,7 +2673,7 @@ function restoreMaximize() {
   if (el) {
     el.classList.remove('maximized');
     const b = el.querySelector('[data-act="maximize"]');
-    if (b) { b.textContent = '⛶︎'; b.title = 'Expand'; }   // back to expand glyph when restored
+    if (b) { b.textContent = 'Expand'; b.title = 'Expand'; }   // back to the expand label when restored
     const id = el.dataset.id;
     setTimeout(()=>{ if (charts[id]) { try{charts[id].resize()}catch(e){} } }, 60);
   }
