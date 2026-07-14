@@ -639,6 +639,20 @@ select.input { cursor: pointer; }
 .box-holder { position: relative; }
 .sankey-holder { position: relative; }
 .bullet-holder, .slope-holder, .bump-holder, .radial-holder, .combo-holder { position: relative; }
+/* Word cloud */
+.wordcloud-holder { position: relative; overflow: hidden; }
+.wc-word { position: absolute; font-weight: 600; line-height: 1; white-space: nowrap; cursor: pointer; transition: opacity .15s, transform .12s; }
+.wc-word:hover { transform: scale(1.06); }
+/* Stream graph */
+.stream-holder { display: flex; flex-direction: column; }
+.stream-legend { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; font-size: 11px; color: var(--text-dim); padding: 2px 0 6px; }
+.stream-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+/* Small multiples */
+.sm-holder { overflow-y: auto; }
+.sm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; width: 100%; }
+.sm-cell { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; min-height: 116px; background: var(--panel); }
+.sm-title { font-size: 11px; font-weight: 700; color: var(--text-dim); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sm-canvas { flex: 1; position: relative; min-height: 72px; }
 #mapFilterBar { margin: 0 0 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .mapfilter-chip { display: inline-flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 6px 8px 6px 13px; font-size: 13px; font-weight: 600; }
 #mapFilterBar .mf-clearall { background: none; border: none; color: var(--accent); font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; padding: 6px 4px; }
@@ -1535,6 +1549,8 @@ const CHART_TYPES = [
   ['worldmap','World Map'],['calendar','Calendar Heatmap'],['waterfall','Waterfall'],['gantt','Gantt / Timeline'],['boxplot','Box Plot'],['sankey','Sankey Diagram'],
   ['bullet','Bullet (vs target)'],['slope','Slope Chart'],['bump','Bump / Ranking'],
   ['combo','Combo (Bar + Line)'],['pareto','Pareto'],['radialbar','Radial Bars'],
+  ['sunburst','Sunburst (2-level)'],['wordcloud','Word Cloud'],['candlestick','Candlestick (OHLC)'],
+  ['stream','Stream Graph'],['smallmult','Small Multiples'],
   ['gauge','Gauge'],['kpi','KPI Cards'],['table','Data Table'],['histogram','Histogram']
 ];
 
@@ -2141,7 +2157,8 @@ function parseAskQuery(q, snap) {
   const TYPE_WORDS = [['pie','pie'],['donut','donut'],['doughnut','donut'],['spline','spline'],['line','line'],
     ['area','area'],['column','column'],['bar','bar'],['scatter','scatter'],['heatmap','heatmap'],['table','table'],
     ['kpi','kpi'],['radar','radar'],['funnel','funnel'],['treemap','treemap'],['pareto','pareto'],['box','boxplot'],
-    ['histogram','histogram'],['map','worldmap'],['gauge','gauge']];
+    ['histogram','histogram'],['map','worldmap'],['gauge','gauge'],
+    ['sunburst','sunburst'],['cloud','wordcloud'],['candle','candlestick'],['stream','stream'],['multiple','smallmult']];
   let type = null;
   for (const [wd, t] of TYPE_WORDS) if (ql.includes(' ' + wd)) { type = t; break; }
   let agg = 'sum';
@@ -3105,6 +3122,9 @@ function renderWidgetBody(w) {
     if (w.type==='combo') { renderCombo(w, body, rows); dataset = prevDs; return; }
     if (w.type==='pareto') { renderPareto(w, body, rows); dataset = prevDs; return; }
     if (w.type==='radialbar') { renderRadialBar(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='wordcloud') { renderWordCloud(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='stream') { renderStream(w, body, rows); dataset = prevDs; return; }
+    if (w.type==='smallmult') { const sm = renderSmallMultiples(w, body, rows); if (sm) charts[w.id] = sm; dataset = prevDs; return; }
 
     const holder = document.createElement('div');
     holder.className = 'chart-holder';
@@ -3223,6 +3243,56 @@ function buildChartConfig(w, rows) {
   if (t==='treemap') return buildTreemap(w, rows, colors);
   if (t==='gauge') return buildGauge(w, rows, colors);
 
+  // Sunburst — two concentric rings: inner = X totals, outer = X · Group breakdown.
+  if (t==='sunburst') {
+    const g = w.group && dataset.columns.includes(w.group) ? w.group : null;
+    if (!g) throw new Error('Sunburst needs a Group By field (the sub-category ring)');
+    const panel = getComputedStyle(document.body).getPropertyValue('--panel');
+    const inner = aggregate(rows, w.x, w.y, w.agg);
+    const order = inner.map(a => String(a[0]));
+    const outer = [];
+    order.forEach((cat, ci) => {
+      const sub = rows.filter(r => String(r[w.x]) === cat);
+      aggregate(sub, g, w.y, w.agg).forEach(([sg, v], si) => outer.push({ ci, si, name: `${cat} · ${sg}`, v }));
+    });
+    return {
+      type: 'doughnut',
+      data: { labels: order, datasets: [
+        { data: outer.map(o => round(o.v)), backgroundColor: outer.map(o => hexA(colors[o.ci % colors.length], 0.45 + 0.18 * (o.si % 3))),
+          borderColor: panel, borderWidth: 1.5, _names: outer.map(o => o.name) },
+        { data: inner.map(a => round(a[1])), backgroundColor: order.map((_, i) => colors[i % colors.length]),
+          borderColor: panel, borderWidth: 2, _names: order }
+      ]},
+      options: baseOpts({ cutout: '28%', plugins: {
+        legend: { position: 'right', labels: { color: textColor() } },
+        tooltip: { callbacks: { label: c => ` ${c.dataset._names[c.dataIndex]}: ${c.formattedValue}` } }
+      }})
+    };
+  }
+
+  // Candlestick — floating bars: thin bar = low→high wick, wide bar = open→close body.
+  if (t==='candlestick') {
+    const o = w.candleOpen, h = w.candleHigh, l = w.candleLow, c = w.y;
+    if (!o || !h || !l) throw new Error('Pick the Open / High / Low columns (Y = Close)');
+    const data = [...rows].sort((a, b) => String(a[w.x]) > String(b[w.x]) ? 1 : -1);
+    const labels = data.map(r => String(r[w.x]));
+    const UP = '#2ea043', DOWN = '#e5534b';
+    const dir = data.map(r => (+r[c] >= +r[o] ? UP : DOWN));
+    const sc = axisOpts();
+    sc.y.beginAtZero = false; sc.y.grace = '4%';
+    return {
+      type: 'bar',
+      data: { labels, datasets: [
+        { data: data.map(r => [+r[l], +r[h]]), backgroundColor: dir, grouped: false, barPercentage: 0.16, categoryPercentage: 1, borderWidth: 0 },
+        { data: data.map(r => [Math.min(+r[o], +r[c]), Math.max(+r[o], +r[c])]), backgroundColor: dir, grouped: false, barPercentage: 0.72, categoryPercentage: 1, borderRadius: 2, borderWidth: 0 }
+      ]},
+      options: baseOpts({ scales: sc, plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: ctx => { const r = data[ctx.dataIndex];
+          return ` O ${round(+r[o])}   H ${round(+r[h])}   L ${round(+r[l])}   C ${round(+r[c])}`; } } }
+      }})
+    };
+  }
+
   // grouped (multi-series) handling
   const grouped = w.group && dataset.columns.includes(w.group);
 
@@ -3335,6 +3405,141 @@ function buildChartConfig(w, rows) {
   applyRefLines(cfg, w, isH);
   return cfg;
 }
+/* ---- Word cloud — spiral layout with collision avoidance, no library.
+   Words are sized by value and clicking one cross-filters the dashboard. ---- */
+function renderWordCloud(w, container, rows) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder wordcloud-holder';
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  if (!w.x) { holder.innerHTML = '<div class="bpreview-empty">Pick an <b>X (word)</b> column.</div>'; return; }
+  const agg = aggregate(rows, w.x, w.y, (w.agg && w.agg !== 'none') ? w.agg : 'count')
+    .filter(a => a[0] !== '' && a[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 60);
+  if (!agg.length) { holder.innerHTML = '<div class="bpreview-empty">No data to plot.</div>'; return; }
+  const colors = pal(w.theme);
+  const W = holder.clientWidth || 600, H = holder.clientHeight || 300;
+  const meas = document.createElement('canvas').getContext('2d');
+  const max = agg[0][1], min = agg[agg.length - 1][1];
+  const placed = [];
+  const frag = document.createDocumentFragment();
+  agg.forEach(([word, v], i) => {
+    const size = 13 + Math.round(29 * (max === min ? 0.5 : (v - min) / (max - min)));
+    meas.font = `600 ${size}px Inter, sans-serif`;
+    const tw = meas.measureText(String(word)).width + 8, th = size + 6;
+    let x = 0, y = 0, ok = false;
+    for (let t = 0; t < 900 && !ok; t++) {   // archimedean spiral outwards from the center
+      const a = 0.32 * t, r = a * 1.9;
+      x = W / 2 + r * Math.cos(a) - tw / 2;
+      y = H / 2 + r * Math.sin(a) * 0.62 - th / 2;
+      if (x < 0 || y < 0 || x + tw > W || y + th > H) continue;
+      ok = !placed.some(p => x < p.x + p.w && x + tw > p.x && y < p.y + p.h && y + th > p.y);
+    }
+    if (!ok) return;   // no room left — skip the smallest words
+    placed.push({ x, y, w: tw, h: th });
+    const span = document.createElement('span');
+    span.className = 'wc-word';
+    span.textContent = String(word);
+    span.title = `${word}: ${round(v)}`;
+    span.style.cssText = `left:${x}px;top:${y}px;font-size:${size}px;color:${colors[i % colors.length]}`;
+    span.onclick = () => toggleCrossFilter(w.x, word, w.id);
+    frag.appendChild(span);
+  });
+  holder.appendChild(frag);
+  const sel = crossFilterValues(w.x);   // fade unselected words while a filter is active
+  if (sel.size) holder.querySelectorAll('.wc-word').forEach(s => { if (!sel.has(s.textContent)) s.style.opacity = 0.22; });
+}
+
+/* ---- Stream graph — d3 stacked area with the "wiggle" offset flowing
+   around the horizontal center. X = time, Group = series, Y = value. ---- */
+function renderStream(w, container, rows) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder stream-holder';
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  if (!w.x || !w.group) { holder.innerHTML = '<div class="bpreview-empty">Stream graph needs <b>X (time)</b>, <b>Group by</b> (series) and <b>Y</b> (value).</div>'; return; }
+  const xs = [...new Set(rows.map(r => String(r[w.x])))].sort();
+  const gs = [...new Set(rows.map(r => String(r[w.group])))].slice(0, 8);
+  if (xs.length < 3) { holder.innerHTML = '<div class="bpreview-empty">Need at least 3 time points.</div>'; return; }
+  const table = xs.map(x => {
+    const o = { x };
+    gs.forEach(g => { o[g] = rows.filter(r => String(r[w.x]) === x && String(r[w.group]) === g).reduce((s, r) => s + (+r[w.y] || 0), 0); });
+    return o;
+  });
+  const W = holder.clientWidth || 600, H = (holder.clientHeight || 300) - 20;
+  const series = d3.stack().keys(gs).offset(d3.stackOffsetWiggle).order(d3.stackOrderInsideOut)(table);
+  const xScale = d3.scalePoint().domain(xs).range([0, W]);
+  const yScale = d3.scaleLinear()
+    .domain([d3.min(series, s => d3.min(s, d => d[0])), d3.max(series, s => d3.max(s, d => d[1]))])
+    .range([H - 16, 4]);
+  const area = d3.area().x(d => xScale(d.data.x)).y0(d => yScale(d[0])).y1(d => yScale(d[1])).curve(d3.curveBasis);
+  const colors = pal(w.theme);
+  const legend = document.createElement('div');
+  legend.className = 'stream-legend';
+  legend.innerHTML = gs.map((g, i) => `<span><i style="background:${colors[i % colors.length]}"></i>${escapeHtml(g)}</span>`).join('');
+  holder.appendChild(legend);
+  const svg = d3.select(holder).append('svg').attr('viewBox', `0 0 ${W} ${H}`).style('flex', '1').style('width', '100%');
+  svg.selectAll('path').data(series).join('path')
+    .attr('d', area)
+    .attr('fill', (d, i) => hexA(colors[i % colors.length], 0.85))
+    .on('mouseenter', function () { d3.select(this).attr('opacity', 0.75); })
+    .on('mouseleave', function () { d3.select(this).attr('opacity', 1); })
+    .append('title').text(d => d.key);
+  const step = Math.max(1, Math.ceil(xs.length / 8));
+  svg.selectAll('text.tick').data(xs.filter((_, i) => i % step === 0)).join('text')
+    .attr('class', 'tick').attr('x', d => xScale(d)).attr('y', H - 4)
+    .attr('text-anchor', 'middle').attr('font-size', 10).attr('font-family', 'Inter')
+    .attr('fill', textColor()).text(d => d);
+}
+
+/* ---- Small multiples — one mini chart per Group value, all sharing the
+   same Y scale so magnitudes stay comparable across facets. ---- */
+function renderSmallMultiples(w, container, rows) {
+  const holder = document.createElement('div');
+  holder.className = 'chart-holder sm-holder';
+  if (w.heightPx) holder.style.height = w.heightPx + 'px';
+  else if (container.id === 'builderPreview') holder.style.height = '320px';
+  container.appendChild(holder);
+  if (!w.group) { holder.innerHTML = '<div class="bpreview-empty">Small multiples needs a <b>Group by</b> field — one mini chart per value.</div>'; return null; }
+  const facets = [...new Set(rows.map(r => String(r[w.group])))].slice(0, 12);
+  const timeish = colType(w.x) === 'date';
+  let yMax = 0;
+  const per = facets.map(f => {
+    const sub = rows.filter(r => String(r[w.group]) === f);
+    const agg = aggregate(sub, w.x, w.y, (!w.agg || w.agg === 'none') ? 'sum' : w.agg);
+    agg.sort((a, b) => String(a[0]) > String(b[0]) ? 1 : -1);
+    yMax = Math.max(yMax, ...agg.map(a => a[1]));
+    return { f, agg };
+  });
+  const colors = pal(w.theme);
+  const grid = document.createElement('div');
+  grid.className = 'sm-grid';
+  holder.appendChild(grid);
+  const minis = [];
+  per.forEach(({ f, agg }, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'sm-cell';
+    cell.innerHTML = `<div class="sm-title" title="${escapeHtml(f)}">${escapeHtml(f)}</div>`;
+    const cwrap = document.createElement('div'); cwrap.className = 'sm-canvas';
+    const cvs = document.createElement('canvas'); cwrap.appendChild(cvs);
+    cell.appendChild(cwrap); grid.appendChild(cell);
+    const color = colors[i % colors.length];
+    minis.push(new Chart(cvs.getContext('2d'), {
+      type: timeish ? 'line' : 'bar',
+      data: { labels: agg.map(a => String(a[0])), datasets: [timeish
+        ? { data: agg.map(a => round(a[1])), borderColor: color, backgroundColor: hexA(color, 0.15), fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 }
+        : { data: agg.map(a => round(a[1])), backgroundColor: color, borderRadius: 3 }] },
+      options: { responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { display: false }, y: { display: false, min: 0, max: yMax || undefined } } }
+    }));
+  });
+  // facade so the grid's destroy/resize handling treats this like one chart
+  return { destroy() { minis.forEach(c => { try { c.destroy(); } catch (e) {} }); },
+           resize() { minis.forEach(c => { try { c.resize(); } catch (e) {} }); } };
+}
+
 function legendC(){ return { legend:{ labels:{ color:textColor(), boxWidth:12, font:{size:11} } } }; }
 
 /* =====================================================================
@@ -4973,6 +5178,20 @@ function renderBuilderForm() {
     <div class="bhint">« Y / Value » = barres, <b>Line column</b> = ligne sur l'axe de droite (ex : ventes en barres + marge % en ligne).</div>` : ''}
     ${d.type === 'pareto' ? `<div class="bhint">Barres triées de la plus grande à la plus petite + ligne du <b>% cumulé</b> — repère vite les catégories qui pèsent le plus (règle 80/20).</div>` : ''}
     ${d.type === 'radialbar' ? `<div class="bhint">Anneaux concentriques animés — un par catégorie (top 8), longueur d'arc proportionnelle à la valeur.</div>` : ''}
+    ${d.type === 'sunburst' ? `<div class="bhint">Two-level hierarchy: « X / Label » = inner ring (category), <b>Group by</b> = outer ring (sub-category), « Y / Value » = slice size.</div>` : ''}
+    ${d.type === 'wordcloud' ? `<div class="bhint">« X / Label » = the word/text column, « Y / Value » = its weight (leave aggregate on <b>count</b> to size by frequency). Click a word to filter the dashboard.</div>` : ''}
+    ${d.type === 'stream' ? `<div class="bhint">Flowing stacked area: « X / Label » = time column, <b>Group by</b> = series (max 8), « Y / Value » = value per period.</div>` : ''}
+    ${d.type === 'smallmult' ? `<div class="bhint">One mini chart per <b>Group by</b> value (max 12), all on the SAME Y scale so magnitudes stay comparable. Uses lines for date X, bars otherwise.</div>` : ''}
+    ${d.type === 'candlestick' ? `
+    <div class="brow">
+      <div class="bfield"><label>Open column</label><select class="binput" id="bCandleOpen">${cols.length ? optBlank(cols, d.candleOpen) : '<option value="">—</option>'}</select></div>
+      <div class="bfield"><label>High column</label><select class="binput" id="bCandleHigh">${cols.length ? optBlank(cols, d.candleHigh) : '<option value="">—</option>'}</select></div>
+    </div>
+    <div class="brow">
+      <div class="bfield"><label>Low column</label><select class="binput" id="bCandleLow">${cols.length ? optBlank(cols, d.candleLow) : '<option value="">—</option>'}</select></div>
+      <div class="bfield"></div>
+    </div>
+    <div class="bhint">« X / Label » = period, « Y / Value » = <b>Close</b>. Green candle = close ≥ open, red = close &lt; open; the thin bar spans Low → High.</div>` : ''}
     <div class="bfield"><label>Color theme</label><select class="binput" id="bTheme">${Object.keys(PALETTES).map(p => `<option ${p === d.theme ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
     ${ANALYTICS_TYPES.includes(d.type) ? `
     <div class="bfield">
@@ -5043,6 +5262,7 @@ function renderBuilderForm() {
   bind('#bGanttStart', 'ganttStart'); bind('#bGanttEnd', 'ganttEnd');
   bind('#bSankeySource', 'sankeySource'); bind('#bSankeyTarget', 'sankeyTarget');
   bind('#bBulletTarget', 'bulletTarget'); bind('#bSlopeEnd', 'slopeEnd'); bind('#bComboLine', 'comboLine');
+  bind('#bCandleOpen', 'candleOpen'); bind('#bCandleHigh', 'candleHigh'); bind('#bCandleLow', 'candleLow');
   // Analytics section (trend / forecast / reference lines)
   const bTrend = $('#bTrend');
   if (bTrend) {
@@ -5160,6 +5380,9 @@ function builderPreview() {
   if (d.type === 'combo') { renderCombo(d, holder, rows); if (builderDataset) dataset = prev; return; }
   if (d.type === 'pareto') { renderPareto(d, holder, rows); if (builderDataset) dataset = prev; return; }
   if (d.type === 'radialbar') { renderRadialBar(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'wordcloud') { renderWordCloud(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'stream') { renderStream(d, holder, rows); if (builderDataset) dataset = prev; return; }
+  if (d.type === 'smallmult') { builderChart = renderSmallMultiples(d, holder, rows); if (builderDataset) dataset = prev; return; }
   try {
     const c = document.createElement('canvas');
     holder.appendChild(c);
